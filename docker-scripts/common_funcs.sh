@@ -7,13 +7,25 @@ check_and_source_variables_file(){
        as the first argument to the called function)"
        return 1
     else
-     echo "sourcing container specific variable file $1"
-     source $1
-     return 0
+       check_and_source_file $1
+        return $?
     fi
 
 }
 
+check_and_source_file(){
+
+   if [ -f "$1" ]; then
+     echo "sourcing file $1 ..."
+     source $1
+     return $?
+
+    else
+      echo "could not source file $1. please check and make sure that file $1 exists"
+      return 1
+    fi
+
+}
 
 start_db_container(){
   check_and_source_variables_file $1
