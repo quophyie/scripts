@@ -23,12 +23,22 @@ envFilenameOnly=./.env
 # cannot be used to update key values in the .env file
 # Args:
 #     $1: The path to the directory containing / should contain the env file  e.g. (~/myproj)
-#     $2: The example env file used to create or update the .env file. This Defaults to '$1/.env.example' i.e. the
-#         default .example.env file is created by concatenating the  directory specified by the
-#         1st arg (i.e. $1) and the default file name of '.example.env' e.g. (~/myproj/.example.env)
-#         The .env.example file can also be supplied even if the .env file does exists. In such a situation,
-#         all keys which exist in the .env.example but not in .env file will be added to the .env file.
-#         The .env.example cannot be used to update key values in the .env file
+#     $2: The example env file used to create or update the .env file. This Defaults to '$1/.env.example'
+#         e.g. ~/myproj/.env.example. The default .example.env file is created by concatenating the  directory specified by the
+#         1st arg (i.e. $1 e.g. ~/myproj) and the default file name of '.example.env' e.g. (~/myproj/.example.env)
+#         The .env.example ($2) file can also be supplied even if the .env file does exists. In such a situation,
+#         all keys which exist in the .env.example ($2) but not in .env file will be added to the .env file.
+#
+#         **** The .env.example cannot be used to update key values in the .env file. *****
+#
+#         The .env file and the .env.example file must contain key value pairs of the form
+#
+#         KEY=VALUE
+#
+#         AN example of a .env or .env.example
+#
+#         MY_KEY_1=hello
+#         MY_KEY_2=world  
 function create_env_file() {
   set -e
 
@@ -95,12 +105,22 @@ function file_ends_with_newline() {
 # cannot be used to update key values in the .env file
 # Args:
 #     $1: The path to the directory containing / should contain the env file  e.g. (~/myproj)
-#     $2: The example env file used to create or update the .env file. This Defaults to '$1/.env.example' i.e. the
-#         default .example.env file is created by concatenating the  directory specified by the
-#         1st arg (i.e. $1) and the default file name of '.example.env' e.g. (~/myproj/.example.env)
-#         The .env.example file can also be supplied even if the .env file does exists. In such a situation,
-#         all keys which exist in the .env.example but not in .env file will be added to the .env file.
-#         The .env.example cannot be used to update key values in the .env file
+#     $2: The example env file used to create or update the .env file. This Defaults to '$1/.env.example'
+#         e.g. ~/myproj/.env.example. The default .example.env file is created by concatenating the  directory specified by the
+#         1st arg (i.e. $1 e.g. ~/myproj) and the default file name of '.example.env' e.g. (~/myproj/.example.env)
+#         The .env.example ($2) file can also be supplied even if the .env file does exists. In such a situation,
+#         all keys which exist in the .env.example ($2) but not in .env file will be added to the .env file.
+#
+#         **** The .env.example cannot be used to update key values in the .env file. *****
+#
+#         The .env file and the .env.example file must contain key value pairs of the form
+#
+#         KEY=VALUE
+#
+#         AN example of a .env or .env.example
+#
+#         MY_KEY_1=hello
+#         MY_KEY_2=world
 function add_new_env_vars_to_env_file() {
 
 
@@ -165,12 +185,23 @@ echo "finding ${exampleEnvFile}"
 # cannot zbe used to update key values in the .env file
 # Args:
 #     $1: The path to the directory containing / should contain the env file  e.g. (~/myproj)
-#     $2: The example env file used to create or update the .env file. This Defaults to '$1/.env.example' i.e. the
-#         default .example.env file is created by concatenating the  directory specified by the
-#         1st arg (i.e. $1) and the default file name of '.example.env' e.g. (~/myproj/.example.env)
-#         The .env.example file can also be supplied even if the .env file does exists. In such a situation,
-#         all keys which exist in the .env.example but not in .env file will be added to the .env file.
-#         The .env.example cannot be used to update key values in the .env file
+#     $2: The example env file used to create or update the .env file. This Defaults to '$1/.env.example'
+#         e.g. ~/myproj/.env.example. The default .example.env file is created by concatenating the  directory specified by the
+#         1st arg (i.e. $1 e.g. ~/myproj) and the default file name of '.example.env' e.g. (~/myproj/.example.env)
+#         The .env.example ($2) file can also be supplied even if the .env file does exists. In such a situation,
+#         all keys which exist in the .env.example ($2) but not in .env file will be added to the .env file.
+#
+#         **** The .env.example cannot be used to update key values in the .env file. *****
+#
+#         The .env file and the .env.example file must contain key value pairs of the form
+#
+#         KEY=VALUE
+#
+#         AN example of a .env or .env.example
+#
+#         MY_KEY_1=hello
+#         MY_KEY_2=world
+
 function export_env_vars_in_env_file() {
 
   local envFileDir=$1
