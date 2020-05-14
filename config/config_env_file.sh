@@ -4,15 +4,17 @@
 
 # ---- Start unofficial bash strict mode boilerplate
 # http://redsymbol.net/articles/unofficial-bash-strict-mode/
-set -o errexit  # always exit on error
-set -o errtrace # trap errors in functions as well
-set -o pipefail # don't ignore exit codes when piping output
-set -o posix    # more strict failures in subshells
+#set -o errexit  # always exit on error
+#set -o errtrace # trap errors in functions as well
+#set -o pipefail # don't ignore exit codes when piping output
+#set -o posix    # more strict failures in subshells
 # set -x          # enable debugging
 
-IFS="$(printf "\n\t")"
+# IFS="$(printf "\n\t")"
 # ---- End unofficial bash strict mode boilerplate
-
+echo "QUANTAL_SHARED_SCRIPTS_DIR -> ${QUANTAL_SHARED_SCRIPTS_DIR}"
+# source ${QUANTAL_SHARED_SCRIPTS_DIR}/shared/funcs.sh
+source  ${QUANTAL_SHARED_SCRIPTS_DIR}/bin/setup
 cd "$(dirname "${BASH_SOURCE[0]}")/.."
 envFilenameOnly=./.env
 
@@ -38,7 +40,7 @@ envFilenameOnly=./.env
 #         AN example of a .env or .env.example
 #
 #         MY_KEY_1=hello
-#         MY_KEY_2=world  
+#         MY_KEY_2=world
 function create_env_file() {
   set -e
 
@@ -271,20 +273,109 @@ function export_env_vars_in_env_file() {
       if [[ -f  ${EXPORTS_FILE} ]]; then
           # remove the tmp env file after it has been sourced
 
-          echo "echo \"finished exporting env vars\" ">>"${EXPORTS_FILE}"
-          echo "echo \"deleting ${EXPORTS_FILE} ...\" ">>"${EXPORTS_FILE}"
-          echo "rm " ${EXPORTS_FILE}>>"${EXPORTS_FILE}"
-          echo ""
-          echo "Please source file ${EXPORTS_FILE} to complete environment variable exports i.e. "
-          echo ""
-          echo "*****************************"
-          echo "!!! PLEASE COPY AND RUN COMMAND BELOW TO COMPLETE EXPORTS !!!"
-          echo ""
-          echo "source ${EXPORTS_FILE}"
+           local isInProfileCallStack
+          is_sourced_by_shell_init_profile_config_file isInProfileCallStack
+
+          if [[ ${isInProfileCallStack} = "false" ]]; then
+
+              echo "echo \"finished exporting env vars\" ">>"${EXPORTS_FILE}"
+              echo "echo \"deleting ${EXPORTS_FILE} ...\" ">>"${EXPORTS_FILE}"
+              echo "rm " ${EXPORTS_FILE}>>"${EXPORTS_FILE}"
+              echo ""
+              echo "Please source file ${EXPORTS_FILE} to complete environment variable exports i.e. "
+              echo ""
+              echo "*****************************"
+              echo "!!! PLEASE COPY AND RUN COMMAND BELOW TO COMPLETE EXPORTS !!!"
+              echo ""
+              echo "source ${EXPORTS_FILE}"
+              echo ""
+          fi
+
       fi
 
     }
+
 }
 
+# Checks whether this script is sourced by  the shell initializatiion
+# profile config file such as ~/.bash_profile or ~/.zshrc. If this script is sourced
+# by a shell initialization script such  ~/.bash_profile or ~/.zshrc, it will be in
+# the call stack. If you simply call and NOT SOURCE this script from
+# a shell initialization script such  ~/.bash_profile or ~/.zshrc
+# (e.g. if you have this line (e.g.  'sh ~/config_env_file.sh' in ~/.bash_profile or ~/.zshrc),
+# it will executed in a subshell and hence will not be found in call stack of the calling
+# script (e.g. ~/.bash_profile or ~/.zshrc)
+#   Args:
+#       $1: the result of this function call. Will contain the value 'true' if the profile file is in the call stack
+#           and 'false' if not
+function is_sourced_by_shell_init_profile_config_file (){
+
+
+    local  __resultvar=${1}
+    local res
+
+    local profileFile
+    local callStack
+    local homeDir=~
+
+    get_profile_file profileFile
+      local shell
+
+    # Get the shell executing the script
+     get_sub_shell shell
+
+    if [[ ${shell} = "zsh" ]]; then
+            callStack=${funcsourcetrace}
+
+            # printf "\n\nFUNCNAME\n\n"
+            # printf "$funcfiletrace - $funcsourcetrace - $funcstack - $functrace"
+
+           # echo "${funcsourcetrace}"
+
+          else
+
+              # printf "\n\nBASH_SOURCE\n\n"
+              # printf "$BASH_SOURCE \n"
+              get_bash_callstack callStack
+              # echo "bashCallStack -> ${callStack[@]}"
+
+          fi
+
+    # Iterate the arr variable using for loop
+    for callStackItem in ${callStack[@]}; do
+
+
+      if grep -q "${profileFile}" <<< "${callStackItem}"; then
+        res=true
+        break
+      else
+        res=false
+      fi
+    done
+
+    eval $__resultvar="'${res}'"
+}
+
+# will return the call stack in a BASH shell
+# Args:
+#   $1: the return value of this function. This will hold the call stack
+
+function get_bash_callstack() {
+
+  local  __resultvar=${1}
+  local frame=0
+  local res
+  local callstack=()
+  while caller ${frame}; do
+    # add stack item to call stack
+    local stackItem=$(eval caller ${frame})
+    callstack+=("${stackItem}")
+    ((frame++));
+  done
+
+  # return the stach here
+  eval $__resultvar="'${callstack[@]}'"
+
+}
 
 #create_env_file
