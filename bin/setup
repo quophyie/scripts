@@ -1,0 +1,55 @@
+#!/usr/bin/env bash
+
+
+# configures the INFRA_SCRIPTS_ROOT environment variables
+function configure_infra_scripts_dir_env_var() {
+
+ echo "configuring variable QUANTAL_SHARED_SCRIPTS_DIR ..."
+ if [ -z "${QUANTAL_SHARED_SCRIPTS_DIR}" ]; then
+
+# get the correct absolute full name of the scripts-infra  directory (i.e. the directory containing this script)
+# this makes sure that no matter where this file is sourced from,
+# INFRA_SCRIPTS_ROOT will always be set to the correct absolute directory i.e. the directory containing
+# this file
+
+
+    local source
+
+    # Get the shell executing the script
+     local shell
+     get_shell shell
+
+     if [[  "${shell}" = "bash" ]]; then
+         # see https://stackoverflow.com/questions/59895/how-to-get-the-source-directory-of-a-bash-script-from-within-the-script-itself
+        # for more info
+        source="${BASH_SOURCE[0]}"
+
+     elif [[ "${shell}" = "zsh"  ]]; then
+         source="$( cd "$(dirname "${funcfiletrace[1]}")">/dev/null 2>&1 ; pwd -P )"
+     fi
+
+    local isSymLink=false
+
+    # if this file has been symlinked the code in the while loop will resolve until
+    # we the actual directory containing this file is reached
+    while [ -h "$source" ]; do # resolve $SOURCE until the file is no longer a symlink
+      isSymLink=true
+      DIR="$( cd -P "$( dirname "$source" )" >/dev/null 2>&1 && pwd )"
+      source="$(readlink "$source")"
+      [[ $source != /* ]] && source="$DIR/$source" # if $SOURCE was a relative symlink, we need to resolve it relative to the path where the symlink file was located
+    done
+
+
+#    if [[ ${isSymLink} == "true" ]]; then
+#        INFRA_SCRIPTS_ROOT="$( cd -P "$( dirname "$SOURCE" )" >/dev/null 2>&1 && pwd )"
+#    else
+#        INFRA_SCRIPTS_ROOT="$( cd "$( dirname "${BASH_SOURCE[0]}" )" >/dev/null 2>&1 && pwd )"
+#    fi
+
+    QUANTAL_SHARED_SCRIPTS_DIR="$( cd -P "$( dirname "$source" )" >/dev/null 2>&1 && pwd )"
+
+   echo "successfully configured variable QUANTAL_SHARED_SCRIPTS_DIR as ${QUANTAL_SHARED_SCRIPTS_DIR} "
+
+ fi
+
+}
