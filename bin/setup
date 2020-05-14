@@ -1,8 +1,110 @@
 #!/usr/bin/env bash
 
+# Updates  ${PROFILE} file (defined above) to source this file
+function update_profile_with_quantal_shared_scripts_dir_env_var() {
 
-# configures the INFRA_SCRIPTS_ROOT environment variables
-function configure_infra_scripts_dir_env_var() {
+   # local source_line_to_add="\n& # Source Quantal Infra Aliases \n& source ${INFRA_SCRIPTS_ROOT}/setup_aliases.sh\\\n"
+
+    local profile
+
+    get_profile_file profile
+
+    local comment="# Quantal Shared Scripts Root Directory"
+
+    local line_to_insert_source_line_after="source ~\/.bash_profile"
+    local quantals_shared_scripts_dir_env_var="export QUANTAL_SHARED_SCRIPTS_DIR="${QUANTAL_SHARED_SCRIPTS_DIR}""
+    local infra_scripts_escaped_path=$(echo ${QUANTAL_SHARED_SCRIPTS_DIR} | sed -e 's|/|\\/|g')
+    local quantals_shared_scripts_dir_env_var_pattern="export QUANTAL_SHARED_SCRIPTS_DIR=${infra_scripts_escaped_path}"
+
+     if ! grep -q "${infra_scripts_escaped_path}" "${profile}"; then
+
+      # update profile
+    echo "updating profile with command '${infra_scripts_escaped_path}'"
+
+        if grep -q "${line_to_insert_source_line_after}" "${profile}"; then
+           # Insert alias sourcing command after the source bash_profile line in ${PROFILE} file
+           # Note that this is done in reverse order
+            insert_after ${profile} "${line_to_insert_source_line_after}" "${comment}"
+            insert_after ${profile} "${comment}" "${quantals_shared_scripts_dir_env_var}"
+        else
+            # Insert alias sourcing command on last last line in ${PROFILE} file
+            insert_after ${profile} "${line_to_insert_source_line_after}" "${comment}"
+            insert_after ${profile} "${comment}" "${quantals_shared_scripts_dir_env_var}"
+        fi
+    fi
+}
+
+# Finds a line containing a given string in a file and inserts the given new
+# after the found line
+# Args: $1 = the path to the file to search
+#       $2 = the string to search for in the file
+#       $3 = the string to insert after the found line
+function insert_after # file line newText
+{
+
+  local file="$1" line="$2" newText="$3"
+ # echo "inserting '${newText}' after line  "${line}" in file ${file}"
+
+  if grep -q "${line}" "${file}"; then
+    sed -i ".bak" -e "/^$line/a"$'\\\n\\\n'"$newText"$'\n' "$file"
+  else
+      echo -e "\n${newText}" >> ${file}
+  fi
+}
+
+# Returns the profile file used in the shell
+#   Arg:
+#       $1: The profile file returned from this function. the caller of this function must provide a variable which
+#           be set by this function to the file name of the profile
+#
+get_profile_file() {
+
+    local  __resultvar=$1
+    bashProfile=~/.bash_profile
+    zshProfile=~/.zshrc
+
+    if [[ "${SHELL}" = "/bin/zsh" ]]; then
+
+        profile=${zshProfile}
+
+    elif [[ "${SHELL}" = "/bin/bash" ]]; then
+
+        profile=${bashProfile}
+    fi
+
+    # this is the value that is returned to the caller of this function
+
+    eval $__resultvar="'${profile}'"
+
+}
+
+function get_sub_shell(){
+
+    local  __resultvar=$1
+    local profileShell
+
+    if test -n "$ZSH_VERSION"; then
+      profileShell=zsh
+    elif test -n "$BASH_VERSION"; then
+      profileShell=bash
+    elif test -n "$KSH_VERSION"; then
+      profileShell=ksh
+    elif test -n "$FCEDIT"; then
+      profileShell=ksh
+    elif test -n "$PS3"; then
+      profileShell=unknown
+    else
+      profileShell=sh
+    fi
+
+    # this is the value that is returned to the caller of this function
+
+    eval $__resultvar="'${profileShell}'"
+
+}
+
+# configures the QUANTAL_SHARED_SCRIPTS_DIR environment variables
+function configure_quantal_shared_scripts_dir_env_var() {
 
  echo "configuring variable QUANTAL_SHARED_SCRIPTS_DIR ..."
  if [ -z "${QUANTAL_SHARED_SCRIPTS_DIR}" ]; then
@@ -14,12 +116,23 @@ function configure_infra_scripts_dir_env_var() {
 
 
     local source
-
+    local homeDir=~
+    local shell
     # Get the shell executing the script
-     local shell
-     get_shell shell
+     local profileFile
+     get_profile_file profileFile
+     get_sub_shell shell
 
-     if [[  "${shell}" = "bash" ]]; then
+#     if [[  "${profileFile}" = "${homeDir}/.bash_profile" ]]; then
+#         # see https://stackoverflow.com/questions/59895/how-to-get-the-source-directory-of-a-bash-script-from-within-the-script-itself
+#        # for more info
+#        source="${BASH_SOURCE[0]}"
+#
+#     elif [[ "${profileFile}" = "${homeDir}/.zshrc"  ]]; then
+#         source="$( cd "$(dirname "${funcfiletrace[1]}")">/dev/null 2>&1 ; pwd -P )"
+#     fi
+
+ if [[  "${shell}" = "bash" ]]; then
          # see https://stackoverflow.com/questions/59895/how-to-get-the-source-directory-of-a-bash-script-from-within-the-script-itself
         # for more info
         source="${BASH_SOURCE[0]}"
@@ -46,10 +159,22 @@ function configure_infra_scripts_dir_env_var() {
 #        INFRA_SCRIPTS_ROOT="$( cd "$( dirname "${BASH_SOURCE[0]}" )" >/dev/null 2>&1 && pwd )"
 #    fi
 
-    QUANTAL_SHARED_SCRIPTS_DIR="$( cd -P "$( dirname "$source" )" >/dev/null 2>&1 && pwd )"
+    QUANTAL_SHARED_SCRIPTS_DIR="$( cd -P "$( dirname "$source" )"/../ >/dev/null 2>&1 && pwd )"
 
    echo "successfully configured variable QUANTAL_SHARED_SCRIPTS_DIR as ${QUANTAL_SHARED_SCRIPTS_DIR} "
 
  fi
 
 }
+
+configure_quantal_shared_scripts_dir_env_var
+update_profile_with_quantal_shared_scripts_dir_env_var
+PROFILE_FILE=
+get_profile_file PROFILE_FILE
+echo "Please source file ${PROFILE_FILE} to complete environment variable exports i.e. "
+echo ""
+echo "*****************************"
+echo "!!! PLEASE COPY AND RUN COMMAND BELOW TO COMPLETE EXPORTS !!!"
+echo ""
+echo "source ${PROFILE_FILE}"
+
