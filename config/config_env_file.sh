@@ -12,10 +12,43 @@
 
 # IFS="$(printf "\n\t")"
 # ---- End unofficial bash strict mode boilerplate
-echo "QUANTAL_SHARED_SCRIPTS_DIR -> ${QUANTAL_SHARED_SCRIPTS_DIR}"
-# source ${QUANTAL_SHARED_SCRIPTS_DIR}/shared/funcs.sh
-source  ${QUANTAL_SHARED_SCRIPTS_DIR}/bin/setup
-cd "$(dirname "${BASH_SOURCE[0]}")/.."
+
+
+SHARED_SCRIPTS_DIR=$( cd "$(dirname ${BASH_SOURCE[0]})"/.. >/dev/null 2>&1 ; pwd -P )
+SHARED_FUNCS_DIR=$( cd "${SHARED_SCRIPTS_DIR}"/shared >/dev/null 2>&1 ; pwd -P )
+SHARED_FUNCS="${SHARED_FUNCS_DIR}/funcs.sh"
+
+# Source shared funcs
+source ${SHARED_FUNCS}
+
+# Get the result of sourcing (i.e. was the sourcing successful)
+sourceRes=$?
+
+# is_sourced_by_shell_init_profile_config_file is defined in ${SHARED_FUNCS_DIR}/shared/funcs.sh file i.e. [THIS_PROJECT_DIR]/shared/funcs.sh
+isThisScriptSourcedBeingByProfileFile=
+is_sourced_by_shell_init_profile_config_file isThisScriptSourcedBeingByProfileFile
+
+if [[ ${sourceRes} -ne 0 ]]; then
+    # Naive try catch
+
+    {
+
+     printf "\n${BASH_SOURCE[0]}"
+     printf "\nQuantal shared scripts functions not found!\n"
+     printf "Please run command below to configure this project and then run your last command again !\n\n"
+     printf "${SHARED_SCRIPTS_DIR}/bin/setup \n\n"
+
+     if [[ "${isThisScriptSourcedBeingByProfileFile}" = "false" ]]; then
+        printf "this execution of this script is not being sourced from a shell config profile file.\n stopping script execution\n"
+        exit 1
+     fi
+
+    }
+
+fi
+
+#source  ${QUANTAL_SHARED_SCRIPTS_DIR}/shared/funcs.sh
+#cd "$(dirname "${BASH_SOURCE[0]}")/.."
 envFilenameOnly=./.env
 
 # Creates an env file using vars found in the .env.example provided as the 2nd arg to this function
@@ -273,10 +306,10 @@ function export_env_vars_in_env_file() {
       if [[ -f  ${EXPORTS_FILE} ]]; then
           # remove the tmp env file after it has been sourced
 
-           local isInProfileCallStack
+          local isScriptSourcedByProfileFile
           is_sourced_by_shell_init_profile_config_file isInProfileCallStack
 
-          if [[ ${isInProfileCallStack} = "false" ]]; then
+          if [[ ${isScriptSourcedByProfileFile} = "false" ]]; then
 
               echo "echo \"finished exporting env vars\" ">>"${EXPORTS_FILE}"
               echo "echo \"deleting ${EXPORTS_FILE} ...\" ">>"${EXPORTS_FILE}"
@@ -296,86 +329,3 @@ function export_env_vars_in_env_file() {
     }
 
 }
-
-# Checks whether this script is sourced by  the shell initializatiion
-# profile config file such as ~/.bash_profile or ~/.zshrc. If this script is sourced
-# by a shell initialization script such  ~/.bash_profile or ~/.zshrc, it will be in
-# the call stack. If you simply call and NOT SOURCE this script from
-# a shell initialization script such  ~/.bash_profile or ~/.zshrc
-# (e.g. if you have this line (e.g.  'sh ~/config_env_file.sh' in ~/.bash_profile or ~/.zshrc),
-# it will executed in a subshell and hence will not be found in call stack of the calling
-# script (e.g. ~/.bash_profile or ~/.zshrc)
-#   Args:
-#       $1: the result of this function call. Will contain the value 'true' if the profile file is in the call stack
-#           and 'false' if not
-function is_sourced_by_shell_init_profile_config_file (){
-
-
-    local  __resultvar=${1}
-    local res
-
-    local profileFile
-    local callStack
-    local homeDir=~
-
-    get_profile_file profileFile
-      local shell
-
-    # Get the shell executing the script
-     get_sub_shell shell
-
-    if [[ ${shell} = "zsh" ]]; then
-            callStack=${funcsourcetrace}
-
-            # printf "\n\nFUNCNAME\n\n"
-            # printf "$funcfiletrace - $funcsourcetrace - $funcstack - $functrace"
-
-           # echo "${funcsourcetrace}"
-
-          else
-
-              # printf "\n\nBASH_SOURCE\n\n"
-              # printf "$BASH_SOURCE \n"
-              get_bash_callstack callStack
-              # echo "bashCallStack -> ${callStack[@]}"
-
-          fi
-
-    # Iterate the arr variable using for loop
-    for callStackItem in ${callStack[@]}; do
-
-
-      if grep -q "${profileFile}" <<< "${callStackItem}"; then
-        res=true
-        break
-      else
-        res=false
-      fi
-    done
-
-    eval $__resultvar="'${res}'"
-}
-
-# will return the call stack in a BASH shell
-# Args:
-#   $1: the return value of this function. This will hold the call stack
-
-function get_bash_callstack() {
-
-  local  __resultvar=${1}
-  local frame=0
-  local res
-  local callstack=()
-  while caller ${frame}; do
-    # add stack item to call stack
-    local stackItem=$(eval caller ${frame})
-    callstack+=("${stackItem}")
-    ((frame++));
-  done
-
-  # return the stach here
-  eval $__resultvar="'${callstack[@]}'"
-
-}
-
-#create_env_file
