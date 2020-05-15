@@ -47,7 +47,7 @@ get_profile_file() {
 
 # Returns the subshell that a script or executinng command is being run in
 # Args:
-#       $1: the value returned from this function i.e. the subshell
+#       $1: the value returned from this function i.e. the name subshell
 function get_sub_shell(){
 
     local  __resultvar=$1
@@ -73,7 +73,7 @@ function get_sub_shell(){
 
 }
 
-# configures the QUANTAL_SHARED_SCRIPTS_DIR environment variables
+# configures the QUANTAL_SHARED_SCRIPTS_DIR environment variable
 function configure_quantal_shared_scripts_dir_env_var() {
 
  echo "configuring variable QUANTAL_SHARED_SCRIPTS_DIR ..."
@@ -147,8 +147,9 @@ function configure_quantal_shared_scripts_dir_env_var() {
 # it will executed in a subshell and hence will not be found in call stack of the calling
 # script (e.g. ~/.bash_profile or ~/.zshrc)
 #   Args:
-#       $1: the result of this function call. Will contain the value 'true' if the profile file is in the call stack
-#           and 'false' if not
+#       $1: the result of this function call. Will contain the value 'true'
+#       if the profile file (e.g. ~/.bash_profile or ~/.zshrc) is is sourced and is in the call stack
+#       and 'false' if not
 function is_sourced_by_shell_init_profile_config_file (){
 
 
