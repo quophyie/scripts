@@ -1,0 +1,83 @@
+#!/usr/bin/env bash
+
+# shared quantal infra functions
+SHARED_FUNCS_DIR="$( cd "$(dirname "$0")"/../shared >/dev/null 2>&1 ; pwd -P )"
+SHARED_FUNCS="${SHARED_FUNCS_DIR}/funcs.sh"
+
+# *** NOTE ****
+# check_quantal_shared_scripts_dir_exists is defined in shared_infra_funcs.sh
+# check_and_exit_if_infra_scripts_root_env_var_not_exist is defined in shared_infra_funcs.sh
+
+# set -e
+# Naive try catch
+{
+ source ${SHARED_FUNCS}
+} ||
+{
+
+ echo "Quantal shared scripts functions directory not found!"
+ echo "Setup failed"
+ # exit 1
+
+}
+
+
+# Updates  ${PROFILE} file (defined above) to source this file
+function update_profile_with_quantal_shared_scripts_dir_env_var() {
+
+   # local source_line_to_add="\n& # Source Quantal Infra Aliases \n& source ${INFRA_SCRIPTS_ROOT}/setup_aliases.sh\\\n"
+
+    local profile
+
+    get_profile_file profile
+
+    local comment="# Quantal Shared Scripts Root Directory"
+
+    local line_to_insert_source_line_after="source ~\/.bash_profile"
+    local quantals_shared_scripts_dir_env_var="export QUANTAL_SHARED_SCRIPTS_DIR="${QUANTAL_SHARED_SCRIPTS_DIR}""
+    local infra_scripts_escaped_path=$(echo ${QUANTAL_SHARED_SCRIPTS_DIR} | sed -e 's|/|\\/|g')
+    local quantals_shared_scripts_dir_env_var_pattern="export QUANTAL_SHARED_SCRIPTS_DIR=${infra_scripts_escaped_path}"
+
+     if ! grep -q "${infra_scripts_escaped_path}" "${profile}"; then
+
+      # update profile
+    echo "updating profile with command '${infra_scripts_escaped_path}'"
+
+        if grep -q "${line_to_insert_source_line_after}" "${profile}"; then
+           # Insert alias sourcing command after the source bash_profile line in ${PROFILE} file
+           # Note that this is done in reverse order
+            insert_after ${profile} "${line_to_insert_source_line_after}" "${comment}"
+            insert_after ${profile} "${comment}" "${quantals_shared_scripts_dir_env_var}"
+        else
+            # Insert alias sourcing command on last last line in ${PROFILE} file
+            insert_after ${profile} "${line_to_insert_source_line_after}" "${comment}"
+            insert_after ${profile} "${comment}" "${quantals_shared_scripts_dir_env_var}"
+        fi
+    fi
+}
+
+
+function print_post_install_message() {
+
+          local isThisScriptSourcedBeingByProfileFile
+          is_sourced_by_shell_init_profile_config_file isThisScriptSourcedBeingByProfileFile
+
+          if [[ ${isThisScriptSourcedBeingByProfileFile} = "false" ]]; then
+            local profileFile=
+            get_profile_file profileFile
+            echo "Please source file ${profileFile} to complete environment variable exports i.e. "
+            echo ""
+            echo "*****************************"
+            echo "!!! PLEASE COPY AND RUN COMMAND BELOW TO COMPLETE EXPORTS !!!"
+            echo ""
+            echo "source ${profileFile}"
+          fi
+
+}
+
+configure_quantal_shared_scripts_dir_env_var
+update_profile_with_quantal_shared_scripts_dir_env_var
+print_post_install_message
+
+
+

@@ -4,16 +4,51 @@
 
 # ---- Start unofficial bash strict mode boilerplate
 # http://redsymbol.net/articles/unofficial-bash-strict-mode/
-set -o errexit  # always exit on error
-set -o errtrace # trap errors in functions as well
-set -o pipefail # don't ignore exit codes when piping output
-set -o posix    # more strict failures in subshells
+#set -o errexit  # always exit on error
+#set -o errtrace # trap errors in functions as well
+#set -o pipefail # don't ignore exit codes when piping output
+#set -o posix    # more strict failures in subshells
 # set -x          # enable debugging
 
-IFS="$(printf "\n\t")"
+# IFS="$(printf "\n\t")"
 # ---- End unofficial bash strict mode boilerplate
 
-cd "$(dirname "${BASH_SOURCE[0]}")/.."
+
+SHARED_SCRIPTS_DIR=$( cd "$(dirname ${BASH_SOURCE[0]})"/.. >/dev/null 2>&1 ; pwd -P )
+SHARED_FUNCS_DIR=$( cd "${SHARED_SCRIPTS_DIR}"/shared >/dev/null 2>&1 ; pwd -P )
+SHARED_FUNCS="${SHARED_FUNCS_DIR}/funcs.sh"
+
+# Source shared funcs
+source ${SHARED_FUNCS}
+
+# Get the result of sourcing (i.e. was the sourcing successful)
+sourceRes=$?
+
+# is_sourced_by_shell_init_profile_config_file is defined in ${SHARED_FUNCS_DIR}/shared/funcs.sh file i.e. [THIS_PROJECT_DIR]/shared/funcs.sh
+isThisScriptSourcedBeingByProfileFile=
+is_sourced_by_shell_init_profile_config_file isThisScriptSourcedBeingByProfileFile
+
+if [[ ${sourceRes} -ne 0 ]]; then
+    # Naive try catch
+
+    {
+
+     printf "\n${BASH_SOURCE[0]}"
+     printf "\nQuantal shared scripts functions not found!\n"
+     printf "Please run command below to configure this project and then run your last command again !\n\n"
+     printf "${SHARED_SCRIPTS_DIR}/bin/setup \n\n"
+
+     if [[ "${isThisScriptSourcedBeingByProfileFile}" = "false" ]]; then
+        printf "this execution of this script is not being sourced from a shell config profile file.\n stopping script execution\n"
+        exit 1
+     fi
+
+    }
+
+fi
+
+#source  ${QUANTAL_SHARED_SCRIPTS_DIR}/shared/funcs.sh
+#cd "$(dirname "${BASH_SOURCE[0]}")/.."
 envFilenameOnly=./.env
 
 # Creates an env file using vars found in the .env.example provided as the 2nd arg to this function
@@ -23,12 +58,22 @@ envFilenameOnly=./.env
 # cannot be used to update key values in the .env file
 # Args:
 #     $1: The path to the directory containing / should contain the env file  e.g. (~/myproj)
-#     $2: The example env file used to create or update the .env file. This Defaults to '$1/.env.example' i.e. the
-#         default .example.env file is created by concatenating the  directory specified by the
-#         1st arg (i.e. $1) and the default file name of '.example.env' e.g. (~/myproj/.example.env)
-#         The .env.example file can also be supplied even if the .env file does exists. In such a situation,
-#         all keys which exist in the .env.example but not in .env file will be added to the .env file.
-#         The .env.example cannot be used to update key values in the .env file
+#     $2: The example env file used to create or update the .env file. This Defaults to '$1/.env.example'
+#         e.g. ~/myproj/.env.example. The default .example.env file is created by concatenating the  directory specified by the
+#         1st arg (i.e. $1 e.g. ~/myproj) and the default file name of '.example.env' e.g. (~/myproj/.example.env)
+#         The .env.example ($2) file can also be supplied even if the .env file does exists. In such a situation,
+#         all keys which exist in the .env.example ($2) but not in .env file will be added to the .env file.
+#
+#         **** The .env.example cannot be used to update key values in the .env file. *****
+#
+#         The .env file and the .env.example file must contain key value pairs of the form
+#
+#         KEY=VALUE
+#
+#         AN example of a .env or .env.example
+#
+#         MY_KEY_1=hello
+#         MY_KEY_2=world
 function create_env_file() {
   set -e
 
@@ -95,12 +140,22 @@ function file_ends_with_newline() {
 # cannot be used to update key values in the .env file
 # Args:
 #     $1: The path to the directory containing / should contain the env file  e.g. (~/myproj)
-#     $2: The example env file used to create or update the .env file. This Defaults to '$1/.env.example' i.e. the
-#         default .example.env file is created by concatenating the  directory specified by the
-#         1st arg (i.e. $1) and the default file name of '.example.env' e.g. (~/myproj/.example.env)
-#         The .env.example file can also be supplied even if the .env file does exists. In such a situation,
-#         all keys which exist in the .env.example but not in .env file will be added to the .env file.
-#         The .env.example cannot be used to update key values in the .env file
+#     $2: The example env file used to create or update the .env file. This Defaults to '$1/.env.example'
+#         e.g. ~/myproj/.env.example. The default .example.env file is created by concatenating the  directory specified by the
+#         1st arg (i.e. $1 e.g. ~/myproj) and the default file name of '.example.env' e.g. (~/myproj/.example.env)
+#         The .env.example ($2) file can also be supplied even if the .env file does exists. In such a situation,
+#         all keys which exist in the .env.example ($2) but not in .env file will be added to the .env file.
+#
+#         **** The .env.example cannot be used to update key values in the .env file. *****
+#
+#         The .env file and the .env.example file must contain key value pairs of the form
+#
+#         KEY=VALUE
+#
+#         AN example of a .env or .env.example
+#
+#         MY_KEY_1=hello
+#         MY_KEY_2=world
 function add_new_env_vars_to_env_file() {
 
 
@@ -165,12 +220,23 @@ echo "finding ${exampleEnvFile}"
 # cannot zbe used to update key values in the .env file
 # Args:
 #     $1: The path to the directory containing / should contain the env file  e.g. (~/myproj)
-#     $2: The example env file used to create or update the .env file. This Defaults to '$1/.env.example' i.e. the
-#         default .example.env file is created by concatenating the  directory specified by the
-#         1st arg (i.e. $1) and the default file name of '.example.env' e.g. (~/myproj/.example.env)
-#         The .env.example file can also be supplied even if the .env file does exists. In such a situation,
-#         all keys which exist in the .env.example but not in .env file will be added to the .env file.
-#         The .env.example cannot be used to update key values in the .env file
+#     $2: The example env file used to create or update the .env file. This Defaults to '$1/.env.example'
+#         e.g. ~/myproj/.env.example. The default .example.env file is created by concatenating the  directory specified by the
+#         1st arg (i.e. $1 e.g. ~/myproj) and the default file name of '.example.env' e.g. (~/myproj/.example.env)
+#         The .env.example ($2) file can also be supplied even if the .env file does exists. In such a situation,
+#         all keys which exist in the .env.example ($2) but not in .env file will be added to the .env file.
+#
+#         **** The .env.example cannot be used to update key values in the .env file. *****
+#
+#         The .env file and the .env.example file must contain key value pairs of the form
+#
+#         KEY=VALUE
+#
+#         AN example of a .env or .env.example
+#
+#         MY_KEY_1=hello
+#         MY_KEY_2=world
+
 function export_env_vars_in_env_file() {
 
   local envFileDir=$1
@@ -240,20 +306,26 @@ function export_env_vars_in_env_file() {
       if [[ -f  ${EXPORTS_FILE} ]]; then
           # remove the tmp env file after it has been sourced
 
-          echo "echo \"finished exporting env vars\" ">>"${EXPORTS_FILE}"
-          echo "echo \"deleting ${EXPORTS_FILE} ...\" ">>"${EXPORTS_FILE}"
-          echo "rm " ${EXPORTS_FILE}>>"${EXPORTS_FILE}"
-          echo ""
-          echo "Please source file ${EXPORTS_FILE} to complete environment variable exports i.e. "
-          echo ""
-          echo "*****************************"
-          echo "!!! PLEASE COPY AND RUN COMMAND BELOW TO COMPLETE EXPORTS !!!"
-          echo ""
-          echo "source ${EXPORTS_FILE}"
+          local isScriptSourcedByProfileFile
+          is_sourced_by_shell_init_profile_config_file isInProfileCallStack
+
+          if [[ ${isScriptSourcedByProfileFile} = "false" ]]; then
+
+              echo "echo \"finished exporting env vars\" ">>"${EXPORTS_FILE}"
+              echo "echo \"deleting ${EXPORTS_FILE} ...\" ">>"${EXPORTS_FILE}"
+              echo "rm " ${EXPORTS_FILE}>>"${EXPORTS_FILE}"
+              echo ""
+              echo "Please source file ${EXPORTS_FILE} to complete environment variable exports i.e. "
+              echo ""
+              echo "*****************************"
+              echo "!!! PLEASE COPY AND RUN COMMAND BELOW TO COMPLETE EXPORTS !!!"
+              echo ""
+              echo "source ${EXPORTS_FILE}"
+              echo ""
+          fi
+
       fi
 
     }
+
 }
-
-
-#create_env_file
