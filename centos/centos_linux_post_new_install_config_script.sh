@@ -214,7 +214,7 @@ configure_NIC_for_NetworkManager(){
   # nmcli con mod $SSID ipv4.dns "8.8.8.8 8.8.1.1"
   nmcli con down $SSID
   nmcli con up $SSID
-  echo "Finished   NIC $NIC for NetworkManager"
+  echo "Finished configuring NIC $NIC for NetworkManager"
 
 }
 
