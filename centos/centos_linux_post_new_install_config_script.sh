@@ -1,4 +1,23 @@
 #!/bin/bash
+
+# Adds an empty line
+# Args:
+# numOfLines: the number of lines to add: Default = 1
+add_empty_line () {
+    local numOfLines=$1
+
+    if [ -z $numOfLines ]; then
+      numOfLines=1
+    fi
+
+    i=0
+    while [ $i -ne $numOfLines ]
+    do
+      i=$(($i+1))
+      echo ""
+    done
+
+}
 backup_file() {
     BACKED_UP_FILE=
     local file_to_backup=$1
@@ -191,9 +210,14 @@ configure_raid() {
 
 install_zsh_and_oh_my_zsh() {
   # Install Oh My ZSH
+  echo "Installing zsh ..."
   yum install zsh -y
   chsh -s /bin/zsh $USERNAME
+  echo "Finished installing zsh ..."
 
+  add_empty_line
+
+  echo "Installing Oh-My-Zsh ..."
   local origHome=$HOME
   HOME=$USERNAME_HOME
   ZSH=$USERNAME_HOME/.oh-my-zsh
@@ -208,13 +232,20 @@ install_zsh_and_oh_my_zsh() {
   # echo "INSTALL_SCRIPT: $INSTALL_SCRIPT"
 
   /bin/cp $USERNAME_HOME/.oh-my-zsh/templates/zshrc.zsh-template $USERNAME_HOME/.zshrc
+  echo "Finished installing Oh-My-Zsh ..."
 
+  add_empty_line
+
+  echo "Configuring Oh-My-Zsh ..."
+  add_empty_line
   # Install powerline fonts
   install_powerline_fonts
+  add_empty_line
 
-  echo "Sourcing $USERNAME_HOME/.zshrc..."
-  /bin/zsh -c "HOME=$USERNAME_HOME source $USERNAME_HOME/.zshrc"
+#  echo "Sourcing $USERNAME_HOME/.zshrc..."
+#  /bin/zsh -c "HOME=$USERNAME_HOME source $USERNAME_HOME/.zshrc"
 
+  add_empty_line
   # Install Spaceship prompt
   echo "Installing ZSH Theme Spaceship-Prompt ..."
   delete_dir $ZSH_CUSTOM/themes/spaceship-prompt
@@ -222,10 +253,26 @@ install_zsh_and_oh_my_zsh() {
   git clone https://github.com/spaceship-prompt/spaceship-prompt.git "$ZSH_CUSTOM/themes/spaceship-prompt" --depth=1 --quiet
   ln -s "$ZSH_CUSTOM/themes/spaceship-prompt/spaceship.zsh-theme" "$ZSH_CUSTOM/themes/spaceship.zsh-theme"
   echo "Finished installing ZSH Theme Spaceship-Prompt ..."
+  add_empty_line
+
+  # Install Zsh plugins
+  # Install zsh-autosuggestions
+  echo "Installing zsh-autosuggestions ..."
+  delete_dir ${USERNAME_HOME}/.oh-my-zsh/custom/plugins/zsh-autosuggestions
+  /bin/zsh -c "git clone https://github.com/zsh-users/zsh-autosuggestions ${ZSH_CUSTOM:-${USERNAME_HOME}/.oh-my-zsh/custom}/plugins/zsh-autosuggestions --quiet"
+
+  add_empty_line
+
+  # Install zsh-syntax-highlighting
+  echo "Installing zsh-syntax-highlighting ..."
+  delete_dir ${USERNAME_HOME}/.oh-my-zsh/custom/plugins/zsh-syntax-highlighting
+  /bin/zsh -c "git clone https://github.com/zsh-users/zsh-syntax-highlighting.git ${ZSH_CUSTOM:-$USERNAME_HOME/.oh-my-zsh/custom}/plugins/zsh-syntax-highlighting --quiet"
+
+  add_empty_line
 
   # Write ~/.zshrc
   # Create ~/.zshrc
-  echo "Creating $USERNAME_HOME/.zshrc ..."
+  echo "Creating custom $USERNAME_HOME/.zshrc ..."
   backup_file $USERNAME_HOME/.zshrc
 
   echo '# If you come from bash you might have to change your $PATH.
@@ -366,23 +413,11 @@ bindkey "[D" backward-word
 
 ' > $USERNAME_HOME/.zshrc
 
-  # Install Zsh plugins
-  # Install zsh-autosuggestions
-  echo "Installing zsh-autosuggestions ..."
-  delete_dir ${USERNAME_HOME}/.oh-my-zsh/custom/plugins/zsh-autosuggestions
-  /bin/zsh -c "git clone https://github.com/zsh-users/zsh-autosuggestions ${ZSH_CUSTOM:-${USERNAME_HOME}/.oh-my-zsh/custom}/plugins/zsh-autosuggestions --quiet"
-
-  # Install zsh-syntax-highlighting
-  echo "Installing zsh-syntax-highlighting ..."
-  delete_dir ${USERNAME_HOME}/.oh-my-zsh/custom/plugins/zsh-syntax-highlighting
-  /bin/zsh -c "git clone https://github.com/zsh-users/zsh-syntax-highlighting.git ${ZSH_CUSTOM:-$USERNAME_HOME/.oh-my-zsh/custom}/plugins/zsh-syntax-highlighting --quiet"
-  # echo "source ${(q-)PWD}/zsh-syntax-highlighting/zsh-syntax-highlighting.zsh" >> ${ZDOTDIR:-$USERNAME_HOME}/.zshrc
-  # Source .zshrc
-  echo "Sourcing $USERNAME_HOME/.zshrc..."
-  /bin/zsh -c "HOME=$USERNAME_HOME source $USERNAME_HOME/.zshrc"
-  echo "Finished creating $USERNAME_HOME/.zshrc ..."
-
   HOME=$origHome
+
+  echo "Finished creating custom $USERNAME_HOME/.zshrc "
+
+  add_empty_line
 
   # CHMOD $USERNAME_HOME/.oh-my-zsh to allow read, write execute to $USERNAME
   echo "Changing ownership of $USERNAME_HOME/.oh-my-zsh to $USERNAME ..."
@@ -393,10 +428,12 @@ bindkey "[D" backward-word
   chown -R $USERNAME $USERNAME_HOME/.zsh*
   chmod -R u+rwx $USERNAME_HOME/.zsh*
 
+  add_empty_line
+  echo "Finished configuring Oh-My-Zsh ..."
 }
 
-# Set the default run level to mult-user
-change_default_run_level_to_multi_user() {
+# Set the default run level
+change_default_run_level() {
   local defaultRunLevel="1"
   local runLevel=$defaultRunLevel
   echo "Configure the default run level "
@@ -412,7 +449,7 @@ Please select a number or press enter to use the default run level
   "
 
   read runLevel
-# if the user presses Enter and doesnt provide a run level, we set the run leve to the default runlevel
+# if the user  doesnt provide a run level and presses Enter, we set the run leve to the default runlevel
 
   if [ -z $runLevel ]; then
     runLevel=$defaultRunLevel
@@ -426,7 +463,7 @@ The provided run level $runLevel is unknown. Please select a number from the lis
 2) multi-user.target (Recommended for servers)"
          read runLevel
 
-         # if the user presses Enter and doesnt provide a run level, we set the run leve to the default runlevel
+         # if the user doesnt provide a run level and presses Enter, we set the run leve to the default runlevel
          if [ -z $runLevel ]; then
              runLevel=$defaultRunLevel
          fi
@@ -443,19 +480,23 @@ The provided run level $runLevel is unknown. Please select a number from the lis
      systemctl set-default multi-user.target
   fi
 }
-# Captures user input used to initialise the environment variables below
+# Captures user input used to initialise the global variables below
 # USERNAME: This the username of the user for which we configuring. We need to provide this because some commands are called using
 #           sudo which will change the $HOME directory in the sudo context to that of root(i.e. /root), which can cause some undefined
 #           behaviour
 # USERNAME_HOME: The home directory of the provided user. This is set internally and is not user provided
 # HOSTNAME: The hostname that should be assigned to the machine we are configuring - Default = mainframe
+# NIC_CONFIG_BASE_PATH: Set to /etc/sysconfig/network-scripts/ifcfg-
 # DEFAULT_GATEWAY: The default gateway that should used the machine being configured - Default = 192.168.0.1
 # NIC: The network interface card that will be configured with a static IP address of the machine being configured: Default: wlp7s0
 # NIC_IP: The static IP address to be assigned to the NIC
 # $SSID: The SSID of the default Wi-Fi network the machine connects to
 # WIFI_PASSWORD: The WiFi password
 
-configure_user_provided_input_and_initialise_env_vars(){
+configure_user_provided_input_and_initialise_vars(){
+  DATETIME=$(date '+%Y-%m-%d %H:%M:%S' | sed -e 's/ /_/g' | sed -e 's/:/_/g')
+  NIC_CONFIG_BASE_PATH=/etc/sysconfig/network-scripts/ifcfg-
+
   echo "Please provide the username of the user to be configured"
   while [ -z $USERNAME ]
       do
@@ -524,27 +565,34 @@ Please user 'sudo' to execute this script
 ********************************************************"
     exit
   fi
-  INIT_DIR=$PWD
-  DATETIME=$(date '+%Y-%m-%d %H:%M:%S' | sed -e 's/ /_/g' | sed -e 's/:/_/g')
-  echo "DATETIME: $DATETIME
-  "
-  NIC_CONFIG_BASE_PATH=/etc/sysconfig/network-scripts/ifcfg-
+  local initDir=$PWD
 
   # Backs up a file
   # Arg1=file_to_back_up: The file to be backed up
   # Returns the name of the backed up file in an env var called BACKED_UP_FILE
 
-  configure_user_provided_input_and_initialise_env_vars
+  configure_user_provided_input_and_initialise_vars
+  add_empty_line
   install_wget
+  add_empty_line
   install_google_chrome
+  add_empty_line
   configure_hostname
+  add_empty_line
   configure_default_gateway
+  add_empty_line
   configure_resolv_conf
+  add_empty_line
   configure_wpa_supplicant
+  add_empty_line
   configure_raid
+  add_empty_line
   install_git
+  add_empty_line
   install_zsh_and_oh_my_zsh
-  change_default_run_level_to_multi_user
+  add_empty_line
+  change_default_run_level
+  add_empty_line
 
   # Write message about installing VMWare Workstation
   echo "*************************"
@@ -556,8 +604,10 @@ Please user 'sudo' to execute this script
   echo "
 
 Reboot (Only 'YES', 'Yes', 'yes' or 'y' will do)"
-  read REBOOT_CONFIRMATION
-  if [ "$REBOOT_CONFIRMATION" == "Yes" ] || [ "$REBOOT_CONFIRMATION" == "yes" ] || [ "$REBOOT_CONFIRMATION" == "y" ] || [ "$REBOOT_CONFIRMATION" == "YES" ] ; then
+
+  local rebootConfirmation
+  read rebootConfirmation
+  if [ "$rebootConfirmation" == "Yes" ] || [ "$rebootConfirmation" == "yes" ] || [ "$rebootConfirmation" == "y" ] || [ "$rebootConfirmation" == "YES" ] ; then
       sudo reboot
   fi
 
@@ -565,7 +615,7 @@ Reboot (Only 'YES', 'Yes', 'yes' or 'y' will do)"
   if [ "$USERNAME" != "$USER" ] ; then
 
      echo "Logging $USERNAME into ZSH ..."
-     cd $INIT_DIR
+     cd $initDir
      su $USERNAME
   fi
 
