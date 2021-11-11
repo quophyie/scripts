@@ -26,7 +26,7 @@ backup_file() {
         echo "Backing up $file_to_backup ..."
         local backup=$(echo "$file_to_backup" | sed -e "s|$file_to_backup|$file_to_backup-$DATETIME|g")
         echo "Backing up $file_to_backup as $backup"
-        cp -v $file_to_backup $backup
+        cp -v $file_to_backup $backup.bkup
         BACKED_UP_FILE=$backup
 
     else
@@ -80,13 +80,19 @@ install_git() {
 # Installs Powerline-Fonts
 install_powerline_fonts () {
     echo "Installing Powerline Fonts ..."
-    git clone https://github.com/powerline/fonts.git --depth=1 --quiet
+    local font_install_dir=$USERNAME_HOME/fonts
+    delete_dir $font_install_dir
+    git clone https://github.com/powerline/fonts.git --depth=1 --quiet $font_install_dir
     # install
-    cd fonts
+    # Set HOME to $USERNAME_HOME so that we dont accidentally install into root's HOME i.e /root
+    local origHome=$HOME
+    HOME=$USERNAME_HOME
+    cd $font_install_dir
     ./install.sh
     # clean-up a bit
     cd ..
-    rm -rf fonts
+    # rm -rf fonts
+    HOME=$origHome
     echo "Finished installing Powerline Fonts"
 }
 
@@ -195,6 +201,21 @@ NETWORK=192.168.0.0" > $NIC_CONFIG_BASE_PATH$NIC
   echo "creating new $WPA_SUPPLICANT_CONF"
   wpa_passphrase $SSID $WIFI_PASSWORD > $WPA_SUPPLICANT_CONF
   echo "Finished configuring wpa_supplicant ..."
+}
+
+
+# Configure the NIC for NetworkManager
+configure_NIC_for_NetworkManager(){
+  echo "Configuring NIC $NIC for NetworkManager ..."
+  backup_file /etc/NetworkManager/system-connections/$SSID.nmconnection
+  nmcli con mod $SSID ipv4.addresses $NIC_IP/24
+  nmcli con mod $SSID ipv4.gateway $DEFAULT_GATEWAY
+  nmcli con mod $SSID ipv4.method manual
+  # nmcli con mod $SSID ipv4.dns "8.8.8.8 8.8.1.1"
+  nmcli con down $SSID
+  nmcli con up $SSID
+  echo "Finished   NIC $NIC for NetworkManager"
+
 }
 
 #Configure, update and setup raid
@@ -608,7 +629,17 @@ Reboot (Only 'YES', 'Yes', 'yes' or 'y' will do)"
   local rebootConfirmation
   read rebootConfirmation
   if [ "$rebootConfirmation" == "Yes" ] || [ "$rebootConfirmation" == "yes" ] || [ "$rebootConfirmation" == "y" ] || [ "$rebootConfirmation" == "YES" ] ; then
-      sudo reboot
+    add_empty_line
+    configure_NIC_for_NetworkManager
+    sudo reboot
+  else
+    add_empty_line
+    echo "NetworkManager is about to configure the static IP address for NIC $NIC"
+    echo "You will be disconnected during the NIC configuration if you are remotely managing this server"
+    echo "Please reconnect using IP address $NIC_IP"
+    add_empty_line
+    sleep 10
+    configure_NIC_for_NetworkManager
   fi
 
   echo "Finishing set up and logging into ZSH ..."
