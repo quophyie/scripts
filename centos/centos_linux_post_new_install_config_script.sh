@@ -531,7 +531,7 @@ configure_user_provided_input_and_initialise_vars(){
           fi
       done
 
-  echo "Please enter the hostname of the machine you are configuring
+  echo "Please a hostname for the machine you are configuring
 
 Default: mainframe"
   read HOSTNAME
