@@ -635,7 +635,7 @@ Reboot (Only 'YES', 'Yes', 'yes' or 'y' will do)"
   else
     add_empty_line
     echo "NetworkManager is about to configure the static IP address for NIC $NIC"
-    echo "You will be disconnected during the NIC configuration if you are remotely managing this server"
+    echo "You may be disconnected during the NIC configuration if you are remotely managing this server"
     echo "Please reconnect using IP address $NIC_IP"
     add_empty_line
     sleep 10
