@@ -624,7 +624,7 @@ Please user 'sudo' to execute this script
   # Reboot
   echo "
 
-Reboot (Only 'YES', 'Yes', 'yes' or 'y' will do)"
+Reboot (Only 'YES', 'Yes', 'yes' or 'y' will reboot the system)"
 
   local rebootConfirmation
   read rebootConfirmation
