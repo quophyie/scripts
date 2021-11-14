@@ -29,7 +29,27 @@ You may have to `chmod` with execution permissions but assuming that you
 have execution permissions, run the script like so
 
 ```shell
+# Copy the script to the server you are configuring with a tool such as scp
+# scp centos_linux_post_new_install_config_script.sh <USERNAME>@<REMOTE_HOST>:<LOCATION_ON_REMOTE_HOST>
+scp centos_linux_post_new_install_config_script.sh dman@192.168.0.10:/home/dman/Downloads
+
+# SSH to the remote host
+# ssh USERNAME@REMOTE_HOST
+
+ssh dman@192.168.0.10
+
+#On the remote host, execute the script
+# You may have to chmod the script to make it executable
+cd ~/Downloads/
 sudo ./centos_linux_post_new_install_config_script.sh
+
+# Once the script has completed, you will need to use the static ip 
+# address that you configured with script to ssh to the remote 
+# server. For example, if accepted the default static ip (192.168.0.2) when running 
+# the script, we would ssh to the remote server as follows
+
+ssh dman@192.168.0.2
+
 ```
 
 Thats all folks!!

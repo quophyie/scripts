@@ -605,6 +605,7 @@ configure_user_provided_input_and_initialise_vars(){
   VCONSOLE_CONF=/etc/vconsole.conf
 
   echo "Please provide the username of the user to be configured"
+
   while [ -z $USERNAME ]
       do
           read USERNAME
