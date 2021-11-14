@@ -4,19 +4,22 @@ This script  is provided to help with the initial configuration of a Fedora deri
 on a home setup post installation of the new OS
 
 The script will perform the following tasks
-1) Install **`wget`**
-2) Install [Google Chrome](https://www.google.co.uk/chrome/)
-3) Configure the hostname for the server / machine
-4) Add **`/etc/resolv.conf`** with google and cloudflare DNS as the nameservers
-5) Setup a default gateway with 
-6) Set up a static ip for your selected network interface card (NIC)
-7) Configure **`wpa_supplicant`**
-8) Configures NIC with static IP for NetworkManger 
-9) Configures the Raid contoller
-10) Install [git](https://git-scm.com/about)
-11) Install **`zsh`**
-12) Install [oh-my-zsh](https://github.com/ohmyzsh/ohmyzsh) with [Spaceship Prompt](https://spaceship-prompt.sh/) as the default them. It also installs the [zsh-autosuggestions](https://github.com/zsh-users/zsh-autosuggestions/blob/master/INSTALL.md) and [zsh-syntax-highlighting](https://github.com/zsh-users/zsh-syntax-highlighting/blob/master/INSTALL.md). See `~/.zshrc` for more info
-13) It gives you the opportunity to set the default run level of the server (multi-user.target is recommended for advanced server admins)
+1) Configures the Keybaord mapping (i.e. KEYMAP). Defaults to us
+2) Install **`wget`**
+3) Install [Google Chrome](https://www.google.co.uk/chrome/)
+4) Configure the hostname for the server / machine
+5) Add **`/etc/resolv.conf`** with google and cloudflare DNS as the nameservers
+6) Setup a default gateway with 
+7) Set up a static ip for your selected network interface card (NIC)
+8) Configure **`wpa_supplicant`**
+9) Configures NIC with static IP for NetworkManger 
+10) Configures the Raid contoller
+11) Install [git](https://git-scm.com/about)
+12) Install **`zsh`**
+13) Installs Powerline Fonts for Terminal Apps such iTerm in MacOs and the terminal apps found in Desktop environments such as Gnome in the various Linux distros
+14) Installs Powerline TTY terminal consoles (i.e Alt F1 - F6) fonts and sets the default TTY font to the powerline TTY font `ter-powerline-v14n`
+15) Install [oh-my-zsh](https://github.com/ohmyzsh/ohmyzsh) with [Spaceship Prompt](https://spaceship-prompt.sh/) as the default them. It also installs the [zsh-autosuggestions](https://github.com/zsh-users/zsh-autosuggestions/blob/master/INSTALL.md) and [zsh-syntax-highlighting](https://github.com/zsh-users/zsh-syntax-highlighting/blob/master/INSTALL.md). See `~/.zshrc` for more info
+16) It gives you the opportunity to set the default run level of the server (multi-user.target is recommended for advanced server admins)
 
 ## Usage
 

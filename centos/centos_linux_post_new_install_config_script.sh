@@ -18,17 +18,48 @@ add_empty_line () {
     done
 
 }
+
+show_spinner() {
+    local pid=$!
+    local delay=0.4
+    local spinstr='|/-\'
+    while [ "$(ps a | awk '{print $1}' | grep $pid)" ]; do
+        local temp=${spinstr#?}
+        printf " [%c]  " "$spinstr"
+        local spinstr=$temp${spinstr%"$temp"}
+        sleep $delay
+        printf "\b\b\b\b\b\b"
+    done
+    printf "    \b\b\b\b"
+}
+
+# Executes a command and shows a spinner
+# Args:
+# command: the command to execute with a spinner
+exec_command_and_show_spinner() {
+  local command=$@
+  # echo "THE COMMAND AND ARGS ARE $command"
+  ("$@") & show_spinner "$!"
+}
+
 backup_file() {
     BACKED_UP_FILE=
     local file_to_backup=$1
     if [ -f "$file_to_backup" ]; then
         echo "$file_to_backup exists"
         echo "Backing up $file_to_backup ..."
-        local backup=$(echo "$file_to_backup" | sed -e "s|$file_to_backup|$file_to_backup-$DATETIME|g")
-        echo "Backing up $file_to_backup as $backup"
-        cp -v $file_to_backup $backup.bkup
-        BACKED_UP_FILE=$backup
+        local backup
 
+        if [ -f "${file_to_backup}-orig.bkup" ] ; then
+          backup=$(echo "$file_to_backup" | sed -e "s|$file_to_backup|$file_to_backup-$DATETIME|g")
+          backup="$backup.bkup"
+        else
+          backup="${file_to_backup}-orig.bkup"
+        fi
+
+        echo "Backing up $file_to_backup as $backup"
+        cp -v $file_to_backup $backup
+        BACKED_UP_FILE=$backup
     else
         echo "$file_to_backup does not exist. skipping backup"
     fi
@@ -80,22 +111,74 @@ install_git() {
 # Installs Powerline-Fonts
 install_powerline_fonts () {
     echo "Installing Powerline Fonts ..."
-    local font_install_dir=$USERNAME_HOME/fonts
-    delete_dir $font_install_dir
-    git clone https://github.com/powerline/fonts.git --depth=1 --quiet $font_install_dir
+    local fonts_install_dir=$USERNAME_HOME/fonts
+    local tty_consolefonts_dir=/usr/lib/kbd/consolefonts
+    local powerline_tty_font="ter-powerline-v14n"
+    delete_dir "$fonts_install_dir"
+    git clone https://github.com/powerline/fonts.git --depth=1 --quiet $fonts_install_dir
     # install
     # Set HOME to $USERNAME_HOME so that we dont accidentally install into root's HOME i.e /root
     local origHome=$HOME
     HOME=$USERNAME_HOME
-    cd $font_install_dir
+    cd $fonts_install_dir
     ./install.sh
+    echo "Installing Powerline TTY terminal console fonts ... "
+    backup_file $VCONSOLE_CONF
+
+    # Check and make sure that we have the Terminus/PSF in the fonts dir before going ahead with Terminal Fonts Install
+    # NOTE: Only the fonts in Terminus directory (particularly the fonts in Terminus/PSF in the fonts directory) of
+    # powerline fonts can be used in TTY terminals (i.e. Alt F1 - F6 terminal consoles).
+    # The other Powerline fonts are for terminal apps such as iTerm2 terminal app in MacOS
+    # and terminal apps in the desktop environments in the various linux distros such the terminal app in GNOME etc
+    if  [ -d "Terminus/PSF" ] ; then
+      sudo find "." \( -name "$prefix*.psf.gz" \) -type f -print0 | xargs -0 -n1 -I % sudo cp "%" "$tty_consolefonts_dir"
+
+      if grep -iP "^FONT=.*$" $VCONSOLE_CONF ; then
+        # Delete the FONT stanza in /etc/vconsole.conf and replace it with $powerline_tty_font
+        sed -i '/^FONT=.*$/d' $VCONSOLE_CONF
+        echo "Updating $VCONSOLE_CONF with font $powerline_tty_font"
+        echo "FONT=\"$powerline_tty_font\"" >> $VCONSOLE_CONF
+      else
+        echo "Font not set in $VCONSOLE_CONF "
+        echo "Adding font $powerline_tty_font to $VCONSOLE_CONF"
+        echo "FONT=\"$powerline_tty_font\"" >> $VCONSOLE_CONF
+      fi
+
+      setfont $powerline_tty_font
+      echo "Finished Installing Powerline TTY terminal console fonts ... "
+    else
+      echo "$PWD/Terminus/PSF not found!!. Skipping Powerline TTY fonts installation ... "
+    fi
     # clean-up a bit
     cd ..
-    # rm -rf fonts
+    rm -rvf fonts
     HOME=$origHome
     echo "Finished installing Powerline Fonts"
 }
 
+# Configures the keymap i.e the keyboard settings
+# Args:
+#     keymap [Default=us]: the key to use
+configure_keymap () {
+
+  echo "Configuring keymap ..."
+  local keymap=$1
+  if [ -z "$keymap" ]; then
+    keymap="us"
+  fi
+
+  if grep -iP "^KEYMAP=.*$" $VCONSOLE_CONF ; then
+   # Delete the keymap stanza in /etc/vconsole.conf and replace it with $keymap
+   sed -i '/^KEYMAP=.*$/d' $VCONSOLE_CONF
+   echo "Updating $VCONSOLE_CONF with keymap keymap"
+   echo "KEYMAP=\"$keymap\"" >> $VCONSOLE_CONF
+  else
+   echo "Font not set in $VCONSOLE_CONF "
+   echo "Adding font $powerline_tty_font to $VCONSOLE_CONF"
+    echo "KEYMAP=\"$powerline_tty_font\"" >> $VCONSOLE_CONF
+  fi
+  echo "Finished configuring keymap"
+}
 # Installs google chrome
 install_google_chrome () {
   # Install Google Chrome
@@ -506,17 +589,20 @@ The provided run level $runLevel is unknown. Please select a number from the lis
 #           sudo which will change the $HOME directory in the sudo context to that of root(i.e. /root), which can cause some undefined
 #           behaviour
 # USERNAME_HOME: The home directory of the provided user. This is set internally and is not user provided
-# HOSTNAME: The hostname that should be assigned to the machine we are configuring - Default = mainframe
+# HOSTNAME [Default = mainframe]: The hostname that should be assigned to the machine we are configuring
 # NIC_CONFIG_BASE_PATH: Set to /etc/sysconfig/network-scripts/ifcfg-
-# DEFAULT_GATEWAY: The default gateway that should used the machine being configured - Default = 192.168.0.1
-# NIC: The network interface card that will be configured with a static IP address of the machine being configured: Default: wlp7s0
-# NIC_IP: The static IP address to be assigned to the NIC
+# VCONSOLE_CONF: Set to /etc/vconsole.conf
+# KEYMAP [Default=us]: Sets the keyboard mapping i.e. Keymap
+# DEFAULT_GATEWAY [Default = 192.168.0.1]: The default gateway that should used the machine being configured
+# NIC [Default: wlp7s0]: The network interface card that will be configured with a static IP address of the machine being configured
+# NIC_IP [Default: 192.168.0.2]: The static IP address to be assigned to the NIC
 # $SSID: The SSID of the default Wi-Fi network the machine connects to
 # WIFI_PASSWORD: The WiFi password
 
 configure_user_provided_input_and_initialise_vars(){
   DATETIME=$(date '+%Y-%m-%d %H:%M:%S' | sed -e 's/ /_/g' | sed -e 's/:/_/g')
   NIC_CONFIG_BASE_PATH=/etc/sysconfig/network-scripts/ifcfg-
+  VCONSOLE_CONF=/etc/vconsole.conf
 
   echo "Please provide the username of the user to be configured"
   while [ -z $USERNAME ]
@@ -530,6 +616,11 @@ configure_user_provided_input_and_initialise_vars(){
               USERNAME_HOME=/home/$USERNAME
           fi
       done
+
+  echo "Please provide the Keyboard mapping / Keyboard setting (i.e KEYMAP)
+
+  Default: us"
+  read ${KEYMAP:-us}
 
   echo "Please a hostname for the machine you are configuring
 
@@ -594,6 +685,8 @@ Please user 'sudo' to execute this script
 
   configure_user_provided_input_and_initialise_vars
   add_empty_line
+  configure_keymap $KEYMAP
+  add_empty_line
   install_wget
   add_empty_line
   install_google_chrome
@@ -638,7 +731,7 @@ Reboot (Only 'YES', 'Yes', 'yes' or 'y' will reboot the system)"
     echo "You may be disconnected during the NIC configuration if you are remotely managing this server"
     echo "Please reconnect using IP address $NIC_IP"
     add_empty_line
-    sleep 10
+    exec_command_and_show_spinner sleep 10
     configure_NIC_for_NetworkManager
   fi
 
@@ -651,6 +744,5 @@ Reboot (Only 'YES', 'Yes', 'yes' or 'y' will reboot the system)"
   fi
 
 }
-
 # Call main
 main
