@@ -65,6 +65,25 @@ backup_file() {
     fi
 }
 
+# Finds a line containing a given string in a file and inserts the given new
+# after the found line
+# Args: $1 = the path to the file to search
+#       $2 = the string to search for in the file. Not that this is a regex pattern so you must escape special characters such [ ]
+#       and \
+#       $3 = the string to insert after the found line
+function insert_after # file line newText
+{
+
+  local file="$1" line="$2" newText="$3"
+ # echo "inserting '${newText}' after line  "${line}" in file ${file}"
+
+  if grep -q "${line}" "${file}"; then
+    sed -i -e "/^$line/a"$'\\\n'"$newText"$'\n' "$file"
+  else
+      echo -e "\n${newText}" >> ${file}
+  fi
+}
+
 # Set an environment variable called NIC_CONFIG_FILE with
 # the path to the config file of the NIC card to be configured
 # Arg1=NIC Name: Name of the NIC card whose
@@ -111,15 +130,15 @@ install_git() {
 # Installs Powerline-Fonts
 install_powerline_fonts () {
     echo "Installing Powerline Fonts ..."
-    local fonts_install_dir=$USERNAME_HOME/fonts
+    local fonts_install_dir=$USER_UNDER_CONFIG_HOME/fonts
     local tty_consolefonts_dir=/usr/lib/kbd/consolefonts
     local powerline_tty_font="ter-powerline-v14n"
     delete_dir "$fonts_install_dir"
     git clone https://github.com/powerline/fonts.git --depth=1 --quiet $fonts_install_dir
     # install
-    # Set HOME to $USERNAME_HOME so that we dont accidentally install into root's HOME i.e /root
+    # Set HOME to $USER_UNDER_CONFIG_HOME so that we dont accidentally install into root's HOME i.e /root
     local origHome=$HOME
-    HOME=$USERNAME_HOME
+    HOME=$USER_UNDER_CONFIG_HOME
     cd $fonts_install_dir
     ./install.sh
     echo "Installing Powerline TTY terminal console fonts ... "
@@ -151,7 +170,7 @@ install_powerline_fonts () {
     fi
     # clean-up a bit
     cd ..
-    rm -rvf fonts
+    delete_dir fonts
     HOME=$origHome
     echo "Finished installing Powerline Fonts"
 }
@@ -185,7 +204,7 @@ install_google_chrome () {
   echo "Installing Google Chrome ..."
   cd /tmp
   wget https://dl.google.com/linux/direct/google-chrome-stable_current_x86_64.rpm
-  sudo dnf localinstall google-chrome-stable_current_x86_64.rpm
+  sudo dnf localinstall google-chrome-stable_current_x86_64.rpm -y
   #google-chrome &
 
   echo "Google Chrome Completed!..."
@@ -223,8 +242,9 @@ configure_resolv_conf(){
 # Google name servers i.e. Google DNS Servers
 nameserver 8.8.8.8
 nameserver 8.8.1.1
+
 # Cloudflare name servers i.e Cloudflare DNS Servers
-nameserver 8.8.1.1
+nameserver 1.1.1.1
 " > $resolv_conf
 
   echo "Finished creating $resolv_conf"
@@ -290,6 +310,26 @@ NETWORK=192.168.0.0" > $NIC_CONFIG_BASE_PATH$NIC
 # Configure the NIC for NetworkManager
 configure_NIC_for_NetworkManager(){
   echo "Configuring NIC $NIC for NetworkManager ..."
+  local dns_none_config_stanza="dns=none"
+  local network_dns_override_conf=/etc/NetworkManager/conf.d/no-dns-override.conf
+  local network_manager_conf=/etc/NetworkManager/NetworkManager.conf
+
+  if  ! grep -q $dns_none_config_stanza $network_manager_conf  ; then
+    echo "dns=none not found in $network_manager_conf"
+#    backup_file $network_manager_conf
+#    local comment="#inserted by George's post new install config script"
+#    insert_after /etc/NetworkManager/NetworkManager.conf "\[main\]" "$comment"
+#    insert_after /etc/NetworkManager/NetworkManager.conf "$comment" $dns_none_config_stanza
+    echo "Creating NetworkManager dns override config at $network_dns_override_conf"
+    echo -e "[main]
+#Added by George Badu new install post setup script
+#Prevents NetworkManager from overwriting /etc/resolv.conf
+dns=none" > $network_dns_override_conf
+
+  fi
+  systemctl restart NetworkManager.service
+  systemctl enable NetworkManager.service
+
   backup_file /etc/NetworkManager/system-connections/$SSID.nmconnection
   nmcli con mod $SSID ipv4.addresses $NIC_IP/24
   nmcli con mod $SSID ipv4.gateway $DEFAULT_GATEWAY
@@ -316,26 +356,26 @@ install_zsh_and_oh_my_zsh() {
   # Install Oh My ZSH
   echo "Installing zsh ..."
   yum install zsh -y
-  chsh -s /bin/zsh $USERNAME
+  chsh -s /bin/zsh $USER_UNDER_CONFIG
   echo "Finished installing zsh ..."
 
   add_empty_line
 
   echo "Installing Oh-My-Zsh ..."
   local origHome=$HOME
-  HOME=$USERNAME_HOME
-  ZSH=$USERNAME_HOME/.oh-my-zsh
+  HOME=$USER_UNDER_CONFIG_HOME
+  ZSH=$USER_UNDER_CONFIG_HOME/.oh-my-zsh
   ZSH_CUSTOM=$ZSH/custom
 
 
   delete_dir $ZSH
 
-  # ZSH=$USERNAME_HOME/.oh-my-zsh sh -c "$(wget -qO- https://raw.githubusercontent.com/ohmyzsh/ohmyzsh/master/tools/install.sh)" | zsh -c exit
+  # ZSH=$USER_UNDER_CONFIG_HOME/.oh-my-zsh sh -c "$(wget -qO- https://raw.githubusercontent.com/ohmyzsh/ohmyzsh/master/tools/install.sh)" | zsh -c exit
   wget https://github.com/robbyrussell/oh-my-zsh/raw/master/tools/install.sh -O - | zsh
   # INSTALL_SCRIPT=$(wget https://github.com/robbyrussell/oh-my-zsh/raw/master/tools/install.sh -O -)
   # echo "INSTALL_SCRIPT: $INSTALL_SCRIPT"
 
-  /bin/cp $USERNAME_HOME/.oh-my-zsh/templates/zshrc.zsh-template $USERNAME_HOME/.zshrc
+  /bin/cp $USER_UNDER_CONFIG_HOME/.oh-my-zsh/templates/zshrc.zsh-template $USER_UNDER_CONFIG_HOME/.zshrc
   echo "Finished installing Oh-My-Zsh ..."
 
   add_empty_line
@@ -346,8 +386,8 @@ install_zsh_and_oh_my_zsh() {
   install_powerline_fonts
   add_empty_line
 
-#  echo "Sourcing $USERNAME_HOME/.zshrc..."
-#  /bin/zsh -c "HOME=$USERNAME_HOME source $USERNAME_HOME/.zshrc"
+#  echo "Sourcing $USER_UNDER_CONFIG_HOME/.zshrc..."
+#  /bin/zsh -c "HOME=$USER_UNDER_CONFIG_HOME source $USER_UNDER_CONFIG_HOME/.zshrc"
 
   add_empty_line
   # Install Spaceship prompt
@@ -362,22 +402,22 @@ install_zsh_and_oh_my_zsh() {
   # Install Zsh plugins
   # Install zsh-autosuggestions
   echo "Installing zsh-autosuggestions ..."
-  delete_dir ${USERNAME_HOME}/.oh-my-zsh/custom/plugins/zsh-autosuggestions
-  /bin/zsh -c "git clone https://github.com/zsh-users/zsh-autosuggestions ${ZSH_CUSTOM:-${USERNAME_HOME}/.oh-my-zsh/custom}/plugins/zsh-autosuggestions --quiet"
+  delete_dir ${USER_UNDER_CONFIG_HOME}/.oh-my-zsh/custom/plugins/zsh-autosuggestions
+  /bin/zsh -c "git clone https://github.com/zsh-users/zsh-autosuggestions ${ZSH_CUSTOM:-${USER_UNDER_CONFIG_HOME}/.oh-my-zsh/custom}/plugins/zsh-autosuggestions --quiet"
 
   add_empty_line
 
   # Install zsh-syntax-highlighting
   echo "Installing zsh-syntax-highlighting ..."
-  delete_dir ${USERNAME_HOME}/.oh-my-zsh/custom/plugins/zsh-syntax-highlighting
-  /bin/zsh -c "git clone https://github.com/zsh-users/zsh-syntax-highlighting.git ${ZSH_CUSTOM:-$USERNAME_HOME/.oh-my-zsh/custom}/plugins/zsh-syntax-highlighting --quiet"
+  delete_dir ${USER_UNDER_CONFIG_HOME}/.oh-my-zsh/custom/plugins/zsh-syntax-highlighting
+  /bin/zsh -c "git clone https://github.com/zsh-users/zsh-syntax-highlighting.git ${ZSH_CUSTOM:-$USER_UNDER_CONFIG_HOME/.oh-my-zsh/custom}/plugins/zsh-syntax-highlighting --quiet"
 
   add_empty_line
 
   # Write ~/.zshrc
   # Create ~/.zshrc
-  echo "Creating custom $USERNAME_HOME/.zshrc ..."
-  backup_file $USERNAME_HOME/.zshrc
+  echo "Creating custom $USER_UNDER_CONFIG_HOME/.zshrc ..."
+  backup_file $USER_UNDER_CONFIG_HOME/.zshrc
 
   echo '# If you come from bash you might have to change your $PATH.
 # export PATH=$HOME/bin:/usr/local/bin:$PATH
@@ -505,6 +545,12 @@ source $ZSH/oh-my-zsh.sh
 
 source ~/.bash_profile
 
+# If we are in the TTY terminal console, set the font to ter-powerline-v14n
+if tty | grep -iP "^/dev/tty[1-6]{1,1}" ; then
+  echo "Setting font to Powerline TTY font ter-powerline-v14n"
+  setfont ter-powerline-v14n
+fi
+
 # Key Bindings
 # Alt -> to jump one word forward
 bindkey "[C" forward-word
@@ -515,22 +561,22 @@ bindkey "[D" backward-word
 # Delete Word Backword bound to Alt+Backspace
 # bindkey "^[^?" backward-kill-word
 
-' > $USERNAME_HOME/.zshrc
+' > $USER_UNDER_CONFIG_HOME/.zshrc
 
   HOME=$origHome
 
-  echo "Finished creating custom $USERNAME_HOME/.zshrc "
+  echo "Finished creating custom $USER_UNDER_CONFIG_HOME/.zshrc "
 
   add_empty_line
 
-  # CHMOD $USERNAME_HOME/.oh-my-zsh to allow read, write execute to $USERNAME
-  echo "Changing ownership of $USERNAME_HOME/.oh-my-zsh to $USERNAME ..."
-  chown -R $USERNAME $USERNAME_HOME/.oh-my-zsh
-  chmod -R u+rwx $USERNAME_HOME/.oh-my-zsh
+  # CHMOD $USER_UNDER_CONFIG_HOME/.oh-my-zsh to allow read, write execute to $USER_UNDER_CONFIG
+  echo "Changing ownership of $USER_UNDER_CONFIG_HOME/.oh-my-zsh to $USER_UNDER_CONFIG ..."
+  chown -R $USER_UNDER_CONFIG $USER_UNDER_CONFIG_HOME/.oh-my-zsh
+  chmod -R u+rwx $USER_UNDER_CONFIG_HOME/.oh-my-zsh
 
-  echo "Changing ownership of $USERNAME_HOME/.zsh* to $USERNAME ..."
-  chown -R $USERNAME $USERNAME_HOME/.zsh*
-  chmod -R u+rwx $USERNAME_HOME/.zsh*
+  echo "Changing ownership of $USER_UNDER_CONFIG_HOME/.zsh* to $USER_UNDER_CONFIG ..."
+  chown -R $USER_UNDER_CONFIG $USER_UNDER_CONFIG_HOME/.zsh*
+  chmod -R u+rwx $USER_UNDER_CONFIG_HOME/.zsh*
 
   add_empty_line
   echo "Finished configuring Oh-My-Zsh ..."
@@ -585,10 +631,10 @@ The provided run level $runLevel is unknown. Please select a number from the lis
   fi
 }
 # Captures user input used to initialise the global variables below
-# USERNAME: This the username of the user for which we configuring. We need to provide this because some commands are called using
+# USER_UNDER_CONFIG: This the username of the user for which we configuring. We need to provide this because some commands are called using
 #           sudo which will change the $HOME directory in the sudo context to that of root(i.e. /root), which can cause some undefined
 #           behaviour
-# USERNAME_HOME: The home directory of the provided user. This is set internally and is not user provided
+# USER_UNDER_CONFIG_HOME: The home directory of the provided user. This is set internally and is not user provided
 # HOSTNAME [Default = mainframe]: The hostname that should be assigned to the machine we are configuring
 # NIC_CONFIG_BASE_PATH: Set to /etc/sysconfig/network-scripts/ifcfg-
 # VCONSOLE_CONF: Set to /etc/vconsole.conf
@@ -606,15 +652,15 @@ configure_user_provided_input_and_initialise_vars(){
 
   echo "Please provide the username of the user to be configured"
 
-  while [ -z $USERNAME ]
+  while [ -z $USER_UNDER_CONFIG ]
       do
-          read USERNAME
-          if [ -z $USERNAME ]; then
+          read USER_UNDER_CONFIG
+          if [ -z $USER_UNDER_CONFIG ]; then
               echo "Username is required. Please enter the username"
-          elif [ "$USERNAME" == "root" ]; then
-              USERNAME_HOME=/$USERNAME
+          elif [ "$USER_UNDER_CONFIG" == "root" ]; then
+              USER_UNDER_CONFIG_HOME=/$USER_UNDER_CONFIG
           else
-              USERNAME_HOME=/home/$USERNAME
+              USER_UNDER_CONFIG_HOME=/home/$USER_UNDER_CONFIG
           fi
       done
 
@@ -737,11 +783,11 @@ Reboot (Only 'YES', 'Yes', 'yes' or 'y' will reboot the system)"
   fi
 
   echo "Finishing set up and logging into ZSH ..."
-  if [ "$USERNAME" != "$USER" ] ; then
+  if [ "$USER_UNDER_CONFIG" != "$USER" ] ; then
 
-     echo "Logging $USERNAME into ZSH ..."
+     echo "Logging $USER_UNDER_CONFIG into ZSH ..."
      cd $initDir
-     su $USERNAME
+     su $USER_UNDER_CONFIG
   fi
 
 }
