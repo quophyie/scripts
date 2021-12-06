@@ -85,7 +85,7 @@ function create_env_file() {
     exit 1
   fi
 
-  if [[ -z exampleEnvFile ]]; then
+  if [[ -z $exampleEnvFile ]]; then
     exampleEnvFile="${envFileDir}/.env.example"
   fi
 
