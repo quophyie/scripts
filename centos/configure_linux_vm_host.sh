@@ -99,27 +99,25 @@ Default: y"
                    # Dont echo password
                    read -s NS_PASS
                    if [ -z $NS_PASS ]; then
-                       echo "The password for user $NS_USER is required"
+                       echo "The password for DNS server user $NS_USER is required"
                    fi
                done
 
-       echo "Please provide the full path to the dynamic DNS update key on the DNS server i.e $NS_NAME
-Default: /etc/ddnsupdate.key"
+       echo "Please provide the full path to the dynamic DNS update key on the DNS server where the DNS Key should be copied from i.e $NS_NAME
+Default: /etc/named/ddnsupdate.key"
        read DDNS_UPDATE_KEY_ON_NS_SERVER
-    DDNS_UPDATE_KEY_ON_NS_SERVER=${DDNS_UPDATE_KEY_ON_NS_SERVER:-/etc/ddnsupdate.key}
+    DDNS_UPDATE_KEY_ON_NS_SERVER=${DDNS_UPDATE_KEY_ON_NS_SERVER:-/etc/named/ddnsupdate.key}
 
        echo "Please provide the full file path to location where the dynamic update key will be stored on this host i.e $HOSTNAME
-Default: /etc/ddnsupdate.key"
+Default: /etc/named/ddnsupdate.key"
 
        read DDNS_UPDATE_KEY
-       DDNS_UPDATE_KEY=${DDNS_UPDATE_KEY:-/etc/ddnsupdate.key}
+       DDNS_UPDATE_KEY=${DDNS_UPDATE_KEY:-/etc/named/ddnsupdate.key}
      else
        echo "*******************"
-       echo "As you have opted not try to obtain the dynamic DNS update key from the DNS server, please make sure that there is a valid dynamic dns update key file at location /etc/ddnsupdate.key otherwise dynamic DNS updates will not work!!!!"
+       echo "As you have opted not try to obtain the dynamic DNS update key from the DNS server, please make sure that there is a valid dynamic dns update key file at location /etc/named/ddnsupdate.key otherwise dynamic DNS updates will not work!!!!"
        echo "*******************"
      fi
-
-
 
   fi
 }
@@ -160,19 +158,30 @@ main() {
   #                           dns server to obtain the ddnsUpdate key
   #   $7 (dnsServerPassword): if tryObtainDNSUpdateKeyFromDNSServer is true, this is required. This is the password of dnsServerUsername
   #                           used to connect the dns server to obtain the ddnsUpdate key
-  #   $8 (ddnsUpdateKey [Default: /etc/ddnsupdate.key]): The full path to the location of the dynamic dns update on the client.
+  #   $8 (ddnsUpdateKey [Default: /etc/named/ddnsupdate.key]): The full path to the location of the dynamic dns update on the client.
   #     If tryObtainDNSUpdateKeyFromDNSServer is true, the ddnsUpdate key obtained from the server will be written to the provided file path
-  #   $9 (ddnsKeyLocationOnDnsServer[Default: /etc/ddnsupdate.key]): The location on the DNS server where the dynamic DNS update key is stored.
+  #   $9 (ddnsKeyLocationOnDnsServer[Default: /etc/named/ddnsupdate.key]): The location on the DNS server where the dynamic DNS update key is stored.
   #                                                                   Note that dnsServerUsername must have permission to read the ddnsUpdateKey
-  #configure_dynamic_dns_client "192.168.0.2" "mainframe" "homelan.com" "ens33" "y" "dman" "wordup1" "/etc/ddnsupdate.key" "/etc/ddnsupdate.key"
+  #configure_dynamic_dns_client "192.168.0.2" "mainframe" "homelan.com" "ens33" "y" "dman" "wordup1" "/etc/named/ddnsupdate.key" "/etc/named/ddnsupdate.key"
+
+
+  # declare -a packages=("NetworkManager" "f2c-libs" "bind"  )
+  local packages=("NetworkManager" "fitbit" "zenity")
+  # local packages="NetworkManager"
+
+  declare -a notInstalled
+  are_all_listed_packages_installed packages notInstalled
+  printf "Not Installed\n"
+  printf "%s" "${notInstalled[@]}"
+  printf "\n"
 
 }
 
 # Call main
 main
 
-# create dns update systemd service
-# create dns update systemd timer
+
+# Fix NetworkManager overriding /etc/resolv.conf in clients
 
 # Unset
 set +e
