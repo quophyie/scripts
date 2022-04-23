@@ -353,7 +353,7 @@ source ./shared_funcs.sh
 ##   $3 (nic_ip): The ip address of the NIC
 ##   $3 (ssid): the SSID of the Wifi to connect to
 ##   $5 (defaultGateway): The ip address of the default gateway
-#configure_NIC_for_NetworkManager(){
+#configure_Wifi_For_NIC_using_NetworkManager(){
 #  local nic=$1
 #  local nic_ip=$2
 #  local ssid=$3
@@ -700,7 +700,6 @@ source ./shared_funcs.sh
 # DOMAIN_NAME [Default: homelan.com]: The domain to which the host i.e $HOSTNAME belongs
 
 configure_user_provided_input_and_initialise_vars(){
-  DATETIME=$(date '+%Y-%m-%d %H:%M:%S' | sed -e 's/ /_/g' | sed -e 's/:/_/g')
   NIC_CONFIG_BASE_PATH=/etc/sysconfig/network-scripts/ifcfg-
   VCONSOLE_CONF=/etc/vconsole.conf
 
@@ -780,14 +779,16 @@ Default: 192.168.0.2"
     CONFIGURE_DNS_CONFIRMATION=y
     echo "Please provide the domain of $HOSTNAME
 Default: homelan.com"
-    read ${DOMAIN_NAME:-homelan.com}
+    read DOMAIN_NAME
+    DOMAIN_NAME=${DOMAIN_NAME:-homelan.com}
     add_empty_line
 
     if is_answer_yes "$CONFIGURE_DNS_CONFIRMATION"; then
-        echo "Do you want to enable dynamic DNS updates i.e. automatically update the DNS server with new / updated host Ip addresses and names
+        echo "Do you want to enable dynamic DNS updates i.e. allow hosts to automatically update the DNS server with new / updated host Ip addresses and names
 Default: yes"
     print_confirmation_instructions
-      read ${ALLOW_DYNAMIC_DNS_UPDATES:-y}
+      read ALLOW_DYNAMIC_DNS_UPDATES
+      ALLOW_DYNAMIC_DNS_UPDATES=${ALLOW_DYNAMIC_DNS_UPDATES:-y}
       add_empty_line
     fi
  fi
