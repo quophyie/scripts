@@ -827,12 +827,6 @@ main () {
   add_empty_line
 
   if is_answer_yes "$CONFIGURE_DNS_CONFIRMATION"; then
-    #   $1 (dnsServerHostname): The hostname of the dns server e.g. mainframe
-    #   $2 (domain): The dns zone / domain to configure or managed by the server e.g. homelab.com
-    #   $3 (dnsServerIpAddress):  The static Ip address of the dns server e.g. 192.168.0.2
-    #   $4 (cidrBlock): The CIDR block of the network e.g. 192.168.0.0/24
-    #   $5 (allowDynamicDnsUpdates [Default: true]): if true i.e. (y, yes Yes, YES), the dns server allows clients to dynamically update the
-    #                                 DNS with their hostnames and Ip address
     local cidrBlock
     get_suggested_cidr_block "$NIC_IP" cidrBlock
     install_and_configure_dns_server "$HOSTNAME" "$DOMAIN_NAME" "$NIC_IP" "$cidrBlock" "$ALLOW_DYNAMIC_DNS_UPDATES"
@@ -855,7 +849,7 @@ main () {
   read rebootConfirmation
   if is_answer_yes "$rebootConfirmation"  ; then
     add_empty_line
-    configure_NIC_for_NetworkManager "$NIC" "$NIC_IP" "$SSID" "$DEFAULT_GATEWAY"
+    configure_Wifi_For_NIC_using_NetworkManager "$NIC" "$NIC_IP" "$SSID" "$DEFAULT_GATEWAY"
     sudo reboot
   else
     add_empty_line
@@ -864,7 +858,7 @@ main () {
     echo "Please reconnect using IP address $NIC_IP"
     add_empty_line
     exec_command_and_show_spinner sleep 10
-    configure_NIC_for_NetworkManager "$NIC" "$NIC_IP" "$SSID" "$DEFAULT_GATEWAY"
+    configure_Wifi_For_NIC_using_NetworkManager "$NIC" "$NIC_IP" "$SSID" "$DEFAULT_GATEWAY"
   fi
 
   echo "Finishing set up and logging into ZSH ..."
@@ -879,6 +873,7 @@ main () {
 # Call main
 main
 
+# TODO
 # Install BIND
 # Install Kubernetes
 # Add Script to create auto start VMs service
