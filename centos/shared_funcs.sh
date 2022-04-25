@@ -2629,8 +2629,8 @@ EOF'
   if ! is_vm_in_vm_autostart_config "${vmName}"; then
     jq --argjson vm "$vmAutoStartConfig" '.vms += [$vm]' ${VMWARE_AUTOSTART_CONFIG} > /tmp/tmp.json && mv /tmp/tmp.json ${VMWARE_AUTOSTART_CONFIG}
     echo "Finished adding VM ${vmName} to VM auto start config ${VMWARE_AUTOSTART_CONFIG} ..."
-    echo "\$vmName is starting..."
-    /usr/bin/vmrun -T ws start "\$vmxPath" nogui 2>/dev/null && echo "\$vmName started." || echo "\$vmName failed to start."
+    echo "$vmName is starting..."
+    /usr/bin/vmrun -T ws start "$vmxPath" nogui 2>/dev/null && echo "$vmName started." || echo "$vmName failed to start."
   else
     echo "A VM called ${vmName} already exists in auto start config ${VMWARE_AUTOSTART_CONFIG} ..."
     echo "Please supply an alternative VM name and try again . Skipping ..."
