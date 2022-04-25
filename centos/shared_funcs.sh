@@ -319,6 +319,35 @@ is_package_installed() {
 
 }
 
+# Checks whether the supplied vm name is configured in VMWARE_AUTOSTART_CONFIG (default: /opt/vmware_autostart/config.json)
+# Args:
+#     $1 (vmName): the name of the VM to check
+is_vm_in_vm_autostart_config () {
+  require_root_access
+  local vmName=$1
+  local foundVmConfig
+  if [ -z "${vmName}" ]; then
+    print_stack_trace "Arg1 (i.e vmName) is required. Please supply vmName as arg 1"
+    return 1
+  fi
+
+  if [ -z "${VMWARE_AUTOSTART_CONFIG}" ]; then
+
+    local errMsg="Environment variable VMWARE_AUTOSTART_CONFIG has not been set"
+    local suffixMsg="Please run function create_vmware_autostart_service to set VMWARE_AUTOSTART_CONFIG\nDefault VMWARE_AUTOSTART_CONFIG=/opt/vmware_autostart/config.json"
+    print_stack_trace "${errMsg}" "${suffixMsg}"
+    return 1
+  fi
+
+  foundVmConfig=$(jq --arg vmName ${vmName} -r '.vms[] | select(.name | index ($vmName))' ${VMWARE_AUTOSTART_CONFIG} )
+
+  if [ -n "${foundVmConfig}" ]; then
+    return 0
+  fi
+
+  return 1
+}
+
 # Checks if the supplied packages are installed.
 # Will return 0 (true) if all the packages in the supplied list are installed and 1 (false) if at least one is not installed.
 # The packages which are not installed will be returned in $2 (i.e OUT notInstalled) if supplied
@@ -2445,6 +2474,280 @@ EOF'
     fi
 
 }
+
+# creates a systemd service that is used to auto start vms
+# The function is based of this article i.e https://linuxhint.com/autostart-vmware-workstation-pro-16-linux/
+# If successful, the  env var VMWARE_AUTOSTART_CONFIG will be set with value /opt/vmware_autostart/config.json"
+create_vmware_autostart_service(){
+  require_root_access
+  local jqPkg=("jq")
+  local autostartvmwareDir=/opt/vmware_autostart
+  local vmwareAutoStartConfig=${autostartvmwareDir}/config.json
+  local vmwareAutoStartScript=${autostartvmwareDir}/vmare_autostart.sh
+  local vmwareAutoStartServiceFilename=vmare_autostart.service
+  local vmwareAutoStartService=${autostartvmwareDir}/${vmwareAutoStartServiceFilename}
+  install_packages jqPkg
+  mkdir -pv $autostartvmwareDir
+
+  echo "Creating VMWare VMS auto start systemd service ..."
+  if [ ! -f "${vmwareAutoStartConfig}" ]; then
+    echo "Creating ${vmwareAutoStartConfig} ..."
+    cat <<-EOF > ${vmwareAutoStartConfig}
+{
+  "vms": []
+}
+EOF
+    echo "Finished creating ${vmwareAutoStartConfig} ..."
+  fi
+
+  echo "Exporting VMWARE_AUTOSTART_CONFIG=${vmwareAutoStartConfig} "
+  export VMWARE_AUTOSTART_CONFIG=${vmwareAutoStartConfig}
+
+  cat <<EOF > $vmwareAutoStartScript
+#!/bin/bash
+
+msg_auto_answer_disable() {
+  echo "disabling msg.autoAnswer for \$vm_name"
+  sed -i.bak -s '/^msg\.autoAnswer/d' "\$vmx_path"
+}
+
+msg_auto_answer_enable() {
+  echo "enabling msg.autoAnswer for \$vm_name"
+  echo 'msg.autoAnswer = "TRUE"' >> "\$vmx_path"
+}
+
+start_vm() {
+  echo "\$vm_name is starting..."
+  /usr/bin/vmrun -T ws start "\$vmx_path" nogui 2>/dev/null && echo "\$vm_name started." || echo "\$vm_name failed to start."
+}
+
+suspend_vm() {
+  echo "\$vm_name is suspending..."
+  /usr/bin/vmrun -T ws suspend "\$vmx_path" hard 2>/dev/null && echo "\$vm_name suspended." || echo "\$vm_name failed to suspended."
+}
+
+config_file=/opt/vmware-autostart/config.json
+num_vms=\$(jq '.vms | length' < \$config_file)
+action="\$1"
+
+for ((counter=0; counter < \$num_vms; counter++))
+do
+  vm_name=\$(jq -j ".vms[\$counter].name" < \$config_file)
+  vmx_path=\$(jq -j ".vms[\$counter].vmxpath" < \$config_file)
+  vm_autostart=\$(jq -j ".vms[\$counter].autostart" < \$config_file)
+
+  if [ "\$action" == "start" -a "\$vm_autostart" == "true" ]
+  then
+    msg_auto_answer_disable && msg_auto_answer_enable && start_vm
+  fi
+
+  if [ "\$action" == "suspend" -a "\$vm_autostart" == "true" ]
+  then
+    msg_auto_answer_disable && suspend_vm
+  fi
+
+done
+
+exit 0
+EOF
+
+ chmod +x $vmwareAutoStartScript
+
+  cat <<-EOF > $vmwareAutoStartService
+[Unit]
+Description=Automatically Start VMware Virtual Machine
+After=network.target vmware.service
+Requires=network.target vmware.service
+Conflicts=shutdown.target
+Before=shutdown.target multi-user.target
+
+[Service]
+Type=oneshot
+ExecStart=$vmwareAutoStartScript start
+ExecStop=$vmwareAutoStartScript suspend
+Restart=no
+RemainAfterExit=yes
+#User=$(whoami)
+#Group=$(whoami)
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+  if [ -L "/etc/systemd/system/${vmwareAutoStartServiceFilename}" ] ; then
+    rm -v /etc/systemd/system/${vmwareAutoStartServiceFilename}
+  fi
+
+  ln -s $vmwareAutoStartService /etc/systemd/system/${vmwareAutoStartServiceFilename}
+  systemctl daemon-reload
+  systemctl enable ${vmwareAutoStartServiceFilename}
+  echo "Finished creating VMWare VMS auto start systemd service ..."
+}
+
+
+# Adds a vm to the VMs autostart config file  (i.e. env var VMWARE_AUTOSTART_CONFIG=/opt/vmware_autostart/config.json)
+# Args:
+#   $1 (vmName): the name of the VM
+#   $2 (vmxPath): The vmx path of the VM
+#   $3 (autoStart: Defualt=true): determines whether VM should be auto started when host is rebooted
+
+add_vm_to_vm_autostart_config_and_start_vm() {
+  require_root_access
+  local vmName=$1
+  local vmxPath=$2
+  local autoStart=${3:-true}
+  local vmAutoStartConfig=$(eval 'cat << EOF
+{
+  "name": "${vmName}",
+  "vmxpath": "${vmxPath}",
+  "autostart": $autoStart
+}
+EOF'
+)
+
+
+  if [ -z "${vmName}" ]; then
+    print_stack_trace "Arg1 (i.e vmName) is required. Please supply vmName as arg 1"
+    return 1
+  fi
+
+  if [ -z "${vmxPath}" ]; then
+    print_stack_trace "Arg2 (i.e vmxPath) is required. Please supply vmxPath as arg 2"
+    return 1
+  fi
+
+  if [ -z "${VMWARE_AUTOSTART_CONFIG}" ]; then
+
+    local errMsg="Environment variable VMWARE_AUTOSTART_CONFIG has not been set"
+    local suffixMsg="Please run function create_vmware_autostart_service to set VMWARE_AUTOSTART_CONFIG\nDefault VMWARE_AUTOSTART_CONFIG=/opt/vmware_autostart/config.json"
+    print_stack_trace "${errMsg}" "${suffixMsg}"
+    return 1
+  fi
+
+  echo "Adding VM ${vmName} to VM auto start config ${VMWARE_AUTOSTART_CONFIG} ..."
+
+  if ! is_vm_in_vm_autostart_config "${vmName}"; then
+    jq --argjson vm "$vmAutoStartConfig" '.vms += [$vm]' ${VMWARE_AUTOSTART_CONFIG} > /tmp/tmp.json && mv /tmp/tmp.json ${VMWARE_AUTOSTART_CONFIG}
+    echo "Finished adding VM ${vmName} to VM auto start config ${VMWARE_AUTOSTART_CONFIG} ..."
+    echo "\$vmName is starting..."
+    /usr/bin/vmrun -T ws start "\$vmxPath" nogui 2>/dev/null && echo "\$vmName started." || echo "\$vmName failed to start."
+  else
+    echo "A VM called ${vmName} already exists in auto start config ${VMWARE_AUTOSTART_CONFIG} ..."
+    echo "Please supply an alternative VM name and try again . Skipping ..."
+  fi
+
+}
+
+# Deletes the supplied vm from the VM auto start config
+# Args:
+#     $1 (name): The name of the VM to delete from the auto start config (i.e. env var VMWARE_AUTOSTART_CONFIG=/opt/vmware_autostart/config.json)
+delete_vm_from_vm_autostart_config(){
+  require_root_access
+  local vmName=$1
+
+  if [ -z "${vmName}" ]; then
+    print_stack_trace "Arg1 (i.e vmName) is required. Please supply vmName as arg 1"
+    return 1
+  fi
+
+  if [ -z "${VMWARE_AUTOSTART_CONFIG}" ]; then
+
+    local errMsg="Environment variable VMWARE_AUTOSTART_CONFIG has not been set"
+    local suffixMsg="Please run function create_vmware_autostart_service to set VMWARE_AUTOSTART_CONFIG\nDefault VMWARE_AUTOSTART_CONFIG=/opt/vmware_autostart/config.json"
+    print_stack_trace "${errMsg}" "${suffixMsg}"
+    return 1
+  fi
+
+  echo "Deleting VM ${vmName} from VM auto start config ${VMWARE_AUTOSTART_CONFIG} ..."
+
+  if is_vm_in_vm_autostart_config "${vmName}"; then
+    jq 'del(.vms[] | select (.name=="${vmName}"))'  ${VMWARE_AUTOSTART_CONFIG}
+    echo "Deleted VM ${vmName} from VM auto start config ${VMWARE_AUTOSTART_CONFIG}" > /tmp/tmp.json && mv /tmp/tmp.json ${VMWARE_AUTOSTART_CONFIG}
+  else
+    echo "VM ${vmName} NOT FOUND VM auto start config ${VMWARE_AUTOSTART_CONFIG}"
+    echo "Skipping VM Delete ...."
+  fi
+
+}
+
+# Updates the given VM in the VMs autostart config file  (i.e. env var VMWARE_AUTOSTART_CONFIG=/opt/vmware_autostart/config.json)
+#   $1 (vmName): the name of the VM to update
+#   $2 (newVmConfigName [Optional]): the new name of the VM to in the config
+#   $2 (vmxPath [Optional]): If proThe vmx path of the VM to update
+#   $3 (autoStart [Optional]): determines whether VM should be auto started when host is rebooted
+update_vm_config_in_vm_autostart_config (){
+  require_root_access
+  local vmName=$1
+  local newVmConfigName
+  local vmxPath
+  local autoStart
+
+  shift
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --new_vm_config_name=*)
+        local newVmConfigName="${1#*=}"
+        ;;
+      --vmxpath=*)
+        vmxPath="${1#*=}"
+        ;;
+      --autostart=*)
+        autoStart="${1#*=}"
+        ;;
+      *)
+        local errMsg="Invalid Usage"
+        local errMsgSuffix="Example Usage: update_vm_config_in_vm_autostart_config vmName [--new_vm_config_name=someNewName] [--vmxpath=my_vmx_file.vmx] [--autostart=true]"
+        print_stack_trace "${errMsg}" "$errMsgSuffix"
+        exit 1
+    esac
+    shift
+  done
+
+
+  if [ -z "${vmName}" ]; then
+    print_stack_trace "Arg1 (i.e vmName) is required. Please supply the name of the VM to updated as  as arg 1"
+    return 1
+  fi
+
+  if [ -z "${VMWARE_AUTOSTART_CONFIG}" ]; then
+
+    local errMsg="Environment variable VMWARE_AUTOSTART_CONFIG has not been set"
+    local suffixMsg="Please run function create_vmware_autostart_service to set VMWARE_AUTOSTART_CONFIG\nDefault VMWARE_AUTOSTART_CONFIG=/opt/vmware_autostart/config.json"
+    print_stack_trace "${errMsg}" "${suffixMsg}"
+    return 1
+  fi
+
+  echo "Updating vm $vmName in VM auto start config in ..."
+  echo "--new_vm_config_name=$newVmConfigName --vmxpath=${vmxPath} --autostart=${autoStart}"
+  if [ -n "$newVmConfigName" ] ; then
+    if ! is_vm_in_vm_autostart_config "${newVmConfigName}"; then
+      jq --arg vmName ${vmName} --arg newVmConfigName ${newVmConfigName} -r '(.vms[] | select(.name == $vmName) | .name) |= $newVmConfigName' ${VMWARE_AUTOSTART_CONFIG} > /tmp/tmp.json && mv /tmp/tmp.json ${VMWARE_AUTOSTART_CONFIG}
+      vmName=${newVmConfigName}
+    else
+      echo "A VM called ${newVmConfigName} already exists in auto start config ${VMWARE_AUTOSTART_CONFIG} ..."
+      echo "Please supply an alternative new name for the VM name and try again . Skipping ..."
+    fi
+  fi
+
+  if [ -n "${vmxPath}" ]; then
+    if [ -e "${vmxPath}" ]; then
+      jq --arg vmName ${vmName} --arg vmxPath ${vmxPath} -r '(.vms[] | select(.name == $vmName) | .vmxpath) |= $vmxPath' ${VMWARE_AUTOSTART_CONFIG}   > /tmp/tmp.json && mv /tmp/tmp.json ${VMWARE_AUTOSTART_CONFIG}
+    else
+      echo "Invalid VM vmxpath given.. Skipping ..."
+    fi
+  fi
+
+  if [ -n "${autoStart}" ] ; then
+    if [ "true" = "${autoStart}" ] || [ "false" = "${autoStart}" ] ; then
+      jq --arg vmName ${vmName} --argjson autoStart ${autoStart} -r '(.vms[] | select(.name == $vmName) | .autostart) = $autoStart' ${VMWARE_AUTOSTART_CONFIG}  > /tmp/tmp.json && mv /tmp/tmp.json ${VMWARE_AUTOSTART_CONFIG}
+    else
+      echo "Invalid VM autostart value given. Acceptable values are 'true' or 'false'.  Skipping ..."
+    fi
+  fi
+
+  echo "Finished updating vm $vmName in VM auto start config ..."
+}
+
 
 # TODO
 # Complete DNS Configuration for Fedora and Centos
