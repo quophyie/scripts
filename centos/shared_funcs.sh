@@ -42,12 +42,29 @@ function require_root_access() {
   local script_caller=$(whoami)
   if [ "$script_caller" != "root" ]; then
       echo "********************************************************
-This script must be executed by user 'root'.
-Please use 'sudo' to execute this script or login as user
+This script / command must be executed by user 'root'.
+Please use 'sudo' to execute this script / command or login as user
 root before executing this script / commands
 ********************************************************"
     exit
   fi
+}
+
+# Configures the root shell for X11 forwarding and to allow root user to run GUI apps such as vm ware
+configure_x11_for_root () {
+
+    set +e
+    local script_caller=$(whoami)
+    if [ "$script_caller" != "root" ]; then
+      xauth list | grep unix`echo $DISPLAY | cut -c10-12` > /tmp/xauth
+      sudo su -c "source /home/${script_caller}/Downloads/shared_funcs.sh &&  backup_file ~/.Xauthority && rm -v ~/.Xauthority  && exit"
+      sudo su -c "xauth add `cat /tmp/xauth` && xauth add `cat /tmp/xauth` && xauth merge /home/${script_caller}/.Xauthority && echo 'Finished X11 setup for root '&& exit"
+
+    else
+      echo "********************************************************
+This function must be NOT executed by user 'root'
+********************************************************"
+    fi
 }
 # Returns the flavour of the OS e.g.  If the OS is Debian flavoured, will return 'debian' the OUT variable
 # Fedora flavoured OS suchs as Centos, RHEL, RockyLinux, AlmaLinux will return 'fedora' in the OUT variable
@@ -58,17 +75,17 @@ root before executing this script / commands
 #   Example usage get_os_flavour flavour
 get_os_flavour() {
   source /etc/os-release && IFS=', ' read -r -a os_flavours <<< "$ID_LIKE"
-  local fedora_flavours=("rhel centos fedora")
+  echo "ID_LIKE ==> ${ID_LIKE}"
+  local fedora_flavours=("rhel" "centos" "fedora" )
   local debian_flavours=("debian")
   local __flavour__
   local __returnVariable__=$1
 
   for flavour in "${os_flavours[@]}"
     do
-      echo "flavour is $flavour"
-      local funRes
+      local funRes=1
       arrayContains "$flavour" "${fedora_flavours[@]}"
-      local funRes=$?
+      funRes=$?
 
       if [ $funRes -eq 0 ] ; then
         __flavour__="fedora"
@@ -76,14 +93,49 @@ get_os_flavour() {
       fi
 
       arrayContains "$flavour" "${debian_flavours[@]}"
-      local funRes=$?
+      funRes=$?
+
       if [ $funRes -eq 0 ] ; then
         __flavour__="debian"
         break
       fi
     done
   unset IFS # or set back to original IFS if previously set
+  echo "os flavour ===> $__flavour__"
   return_function_result "$__flavour__" "$__returnVariable__"
+}
+
+# Returns  the version of the OS
+# Args:
+#    $1 (OUT version): the os version returned from the function
+get_os_version(){
+  local __os_version_out__=$1
+  source /etc/os-release && IFS=', ' read -r __the_os_version__ <<< "$VERSION_ID"
+  return_function_result "$__the_os_version__" "$__os_version_out__"
+}
+
+# Returns  the name of the OS
+# Args:
+#    $1 (OUT name): the os version returned from the function
+get_os_name(){
+  local __os_name_out__=$1
+  source /etc/os-release && IFS=', ' read -r __the_os_name__ <<< "$ID"
+  return_function_result "$__the_os_name__" "$__os_name_out__"
+}
+
+# Returns true (i.e 0) if the OS is Ubuntu 18.04 or later
+is_ubuntu_18_04_or_later() {
+    local osName
+    local osVersion
+    local osFlavour
+
+    get_os_flavour osFlavour
+    get_os_version osVersion
+    get_os_name osName
+    if [ "debian" == "$osFlavour" ]  && [ 1 -eq "$(echo "$osVersion >= 18.04" | bc)" ] && [ "ubuntu" == "$osName" ]; then
+      return 0
+    fi
+    return 1
 }
 
 # Makes a true clone / copy of a variable including the the statement that was used to declare the variable
@@ -143,7 +195,7 @@ makeTrueCloneOfVariable() {
 #   $2 (OUT stackTrace): will contain the stack trace when provided
 #   $3 (prefixMessage): a message that is prepended to the stack trace
 #   $4 (suffixMessage): a message that is appended to the stack trace
-#   Example Usage: get_stack_trace stackTrace "Some message" "Stack Trace prefix Message" "Stack Trace Suffix Message"
+#   Example Usage: get_stack_trace 1 stackTrace  "Stack Trace prefix Message" "Stack Trace Suffix Message"
 function get_stack_trace () {
    set -e
    local stack=""
@@ -485,7 +537,10 @@ arrayContains () {
   local elem=$1
   local array=$2
   for item in "${array[@]}"; do
-      [[ $elem == "$item" ]] && echo "$elem present in the array"; return 0;
+      if [ $elem == "$item" ]; then
+        echo "$elem present in the array";
+        return 0
+      fi
   done
   return 1
 }
@@ -578,22 +633,27 @@ backup_file() {
 
 # Finds a line containing a given string in a file and inserts the given new
 # after the found line
-# Args: $1 = the path to the file to search
-#       $2 = the string to search for in the file. Not that this is a regex pattern so you must escape special characters such [ ]
+# Note that this supports multi line inserts. For example, you can supply a variable such as below and the value
+# of the variable will be inserted as is
+# textToInsert=$(eval 'cat << EOF
+#      routes:
+#        - to: 0.0.0.0/0
+#          via: ${gatewayIpAddress}
+# EOF
+#')
+# Args: $1 (file): the path to the file to search
+#       $2(regexPattern): the string to search for in the file. Not that this is a regex pattern so you must escape special characters such [ ]
 #       and \
-#       $3 = the string to insert after the found line
+#       $3(textToInsert): the string to insert after the found line
 function insert_after # file line newText
 {
 
-  local file="$1" line="$2" newText="$3"
- # echo "inserting '${newText}' after line  "${line}" in file ${file}"
-
-  if grep -q "${line}" "${file}"; then
-    sed -i -e "/^$line/a"$'\\\n'"$newText"$'\n' "$file"
-  else
-      echo -e "\n${newText}" >> ${file}
-  fi
+  local file="$1" regexPattern="$2" textToInsert="$3"
+  cat << EOF | sed -i "/${regexPattern}/r /dev/stdin" "${file}"
+${textToInsert}
+EOF
 }
+
 
 # Deletes a directory if it can
 # Args
@@ -607,6 +667,266 @@ delete_dir () {
     else
         echo "cannot delete $dir_to_delete. skipping ..."
     fi
+}
+
+# Returns the profile file used in the shell
+#   Arg:
+#       $1: The profile file returned from this function. the caller of this function must provide a variable which
+#           be set by this function to the file name of the profile
+#
+get_profile_file() {
+
+    local  __resultvar=$1
+    local profile
+    local zshProfile="${HOME}/.zshrc"
+
+    if [ "${SHELL}" == "/bin/zsh" ]; then
+
+        profile=${zshProfile}
+
+    elif [ "${SHELL}" == "/bin/bash" ]; then
+
+        if [ -f "${HOME}/.bash_profile" ]; then
+          profile="${HOME}/.bash_profile"
+        elif [ -f "${HOME}/.profile" ]; then
+          profile="${HOME}/.profile"
+        fi
+    fi
+
+    # this is the value that is returned to the caller of this function
+
+    eval $__resultvar="'${profile}'"
+
+}
+
+# Returns the subshell that a script or executinng command is being run in
+# Args:
+#       $1: the value returned from this function i.e. the name subshell
+function get_sub_shell(){
+
+    local  __resultvar=$1
+    local profileShell
+
+    if test -n "$ZSH_VERSION"; then
+      profileShell=zsh
+    elif test -n "$BASH_VERSION"; then
+      profileShell=bash
+    elif test -n "$KSH_VERSION"; then
+      profileShell=ksh
+    elif test -n "$FCEDIT"; then
+      profileShell=ksh
+    elif test -n "$PS3"; then
+      profileShell=unknown
+    else
+      profileShell=sh
+    fi
+
+    # this is the value that is returned to the caller of this function
+
+    eval $__resultvar="'${profileShell}'"
+
+}
+
+# Returns the full path of this file
+#   $1(OUT filePathOut): A var to hold value of the full file path.
+#                               This variable MUST NOT BE PASSED IN the expanded from i.e.
+#                               it must not be prefixed with $ Example use
+function get_fullpath_of_currently_executing_file() {
+  local __fullFilePathOut__=$1
+  local fullFilePath
+  local sourceDir
+
+# get the correct absolute full name of the scripts-infra  directory (i.e. the directory containing this script)
+# this makes sure that no matter where this file is sourced from,
+# INFRA_SCRIPTS_ROOT will always be set to the correct absolute directory i.e. the directory containing
+# this file
+
+
+    local source
+    local homeDir=~
+    local shell
+    # Get the shell executing the script
+     local profileFile
+     get_profile_file profileFile
+     get_sub_shell shell
+
+#     if [[  "${profileFile}" = "${homeDir}/.bash_profile" ]]; then
+#         # see https://stackoverflow.com/questions/59895/how-to-get-the-source-directory-of-a-bash-script-from-within-the-script-itself
+#        # for more info
+#        source="${BASH_SOURCE[0]}"
+#
+#     elif [[ "${profileFile}" = "${homeDir}/.zshrc"  ]]; then
+#         source="$( cd "$(dirname "${funcfiletrace[1]}")">/dev/null 2>&1 ; pwd -P )"
+#     fi
+
+ if [[  "${shell}" = "bash" ]]; then
+         # see https://stackoverflow.com/questions/59895/how-to-get-the-source-directory-of-a-bash-script-from-within-the-script-itself
+        # for more info
+        source="${BASH_SOURCE[0]}"
+
+     elif [[ "${shell}" = "zsh"  ]]; then
+         source="$( cd "$(dirname "${funcfiletrace[1]}")">/dev/null 2>&1 ; pwd -P )"
+     fi
+    local isSymLink=false
+
+    # if this file has been symlinked the code in the while loop will resolve until
+    # we the actual directory containing this file is reached
+    while [ -h "$source" ]; do # resolve $SOURCE until the file is no longer a symlink
+      isSymLink=true
+      DIR="$( cd -P "$( dirname "$source" )" >/dev/null 2>&1 && pwd )"
+      source="$(readlink "$source")"
+      [[ $source != /* ]] && source="$DIR/$source" # if $SOURCE was a relative symlink, we need to resolve it relative to the path where the symlink file was located
+    done
+
+
+#    if [[ ${isSymLink} == "true" ]]; then
+#        INFRA_SCRIPTS_ROOT="$( cd -P "$( dirname "$SOURCE" )" >/dev/null 2>&1 && pwd )"
+#    else
+#        INFRA_SCRIPTS_ROOT="$( cd "$( dirname "${BASH_SOURCE[0]}" )" >/dev/null 2>&1 && pwd )"
+#    fi
+
+    sourceDir="$( cd -P "$( dirname "$source" )"/ >/dev/null 2>&1 && pwd )"
+
+  local filename=${source##*/}
+  fullFilePath=${sourceDir}/${filename}
+  return_function_result "${fullFilePath}" "$__fullFilePathOut__"
+
+}
+
+
+# Will return the value of SHARED_SCRIPTS_DIR env variable (i.e the variable pointing to the location of shared scripts).
+# If  SHARED_SCRIPTS_DIR does not exist, will return a value that can be used to set SHARED_SCRIPTS_DIR
+# Args:
+#   $1(OUT sharedScriptsDirOut): A var to hold value of the SHARED_SCRIPTS_DIR.
+#                               This variable MUST NOT BE PASSED IN the expanded from i.e.
+#                               it must not be prefixed with $ Example use
+
+function get_or_create_shared_scripts_env_var_value() {
+  local __sharedScriptsDirOut__=$1
+  local __sharedCommonScriptsDir__=${SHARED_SCRIPTS_DIR}
+
+ if [ -z "${__sharedCommonScriptsDir__}" ]; then
+    __sharedCommonScriptsDir__="/opt/shared"
+ fi
+
+  return_function_result "${__sharedCommonScriptsDir__}" "$__sharedScriptsDirOut__"
+
+}
+#configures the SHARED_SCRIPTS_DIR environment variable and exports it for both root and the user running this script
+# Args:
+#   $1 (includeRoot [Default=true]): If true, will be configured for root user
+configure_shared_scripts_dir_env_var(){
+
+  local includeRoot=${1:-true}
+  local sharedScriptsDir
+  local script_caller=$(whoami)
+  # Get the shell executing the script
+  local profileFile
+  get_profile_file profileFile
+  get_or_create_shared_scripts_env_var_value sharedScriptsDir
+
+  if [ -f "${profileFile}" ]; then
+    echo "configuring SHARED_SCRIPTS_DIR for ${script_caller} ..."
+    backup_file "${profileFile}"
+    # Delete the line containing the SHARED_SCRIPTS_DIR export
+    sed -i '/^.*SHARED_SCRIPTS_DIR=.*$/d' "${profileFile}"
+    echo "export SHARED_SCRIPTS_DIR=${sharedScriptsDir}" >> "${profileFile}"
+    source "${profileFile}"
+    echo "finished configuring SHARED_SCRIPTS_DIR for ${script_caller} ..."
+  fi
+
+  if is_true "${includeRoot}"; then
+    echo "configuring SHARED_SCRIPTS_DIR for root ..."
+    local thisFile
+    get_fullpath_of_currently_executing_file thisFile
+
+    sudo su -c "source ${thisFile}
+    rootProfile=
+    get_profile_file rootProfile
+    backup_file \${rootProfile}
+    # Delete the line containing the SHARED_SCRIPTS_DIR export
+    sed -i '/^.*SHARED_SCRIPTS_DIR=.*$/d' \${rootProfile}
+    echo \"export SHARED_SCRIPTS_DIR=${sharedScriptsDir} \" >> \${rootProfile}
+    source \${rootProfile}
+    echo \"finished configuring SHARED_SCRIPTS_DIR for root ...\"
+    "
+  fi
+}
+
+# Configures the shell profiles for a user by setting up environment variables, functions,
+# aliases etc
+# Args:
+#     $1 (user): user to configure the shell for
+configure_user_shell(){
+  local __user__=$1
+  local flavour
+  local bashrc
+  local profile
+  get_os_flavour flavour
+  local userHome
+  local sharedScriptsDir="${SHARED_SCRIPTS_DIR}"
+  local sharedScriptsDirRegPattern
+  local sharedScriptsDirInsertionPointRegPattern
+  local sharedScriptsDirInsertionPoint
+  local sharedScriptsDirInsertionText
+
+  if [ "$user" = "root" ]; then
+    userHome="/root"
+  else
+    userHome="/home/${__user__}"
+  fi
+
+  bashrc="${userHome}/.bashrc"
+
+  if [ "$flavour" == "fedora" ]; then
+    profile="${userHome}/.bash_profile"
+
+  elif [ "$flavour" == "debian" ]; then
+    profile="${userHome}/.profile"
+  else
+    echo "Cannot configure shell for Unknown OS flavour"
+    return 1
+  fi
+
+  # Update ~/.bashrc with SHARED_SCRIPTS_DIR env var
+  if [ -z "${sharedScriptsDir}" ]; then
+    get_or_create_shared_scripts_env_var_value sharedScriptsDir
+    # escape backslashes
+    sharedScriptsDirRegPattern=$(echo "${sharedScriptsDir}" | sed "s|/|\/|g")
+    sharedScriptsDirRegPattern="export SHARED_SCRIPTS_DIR=${sharedScriptsDirRegPattern}"
+
+    backup_file "${bashrc}"
+    if ! grep -iP "${sharedScriptsDirRegPattern}" "${bashrc}" ; then
+      if [ "fedora" == "${flavour}" ]; then
+        echo "Configuring SHARED_SCRIPTS_DIR env var in  Fedora Flavoured OS ${bashrc}"
+        sharedScriptsDirInsertionPoint="# .bashrc"
+        sharedScriptsDirInsertionText="# .bashrc\nexport SHARED_SCRIPTS_DIR=${sharedScriptsDir}"
+        sharedScriptsDirInsertionPointRegPattern=$(echo "${sharedScriptsDirInsertionPoint}" | sed "s|[.]|\.|g")
+        sed -i "s|${sharedScriptsDirInsertionPointRegPattern}|${sharedScriptsDirInsertionText}|g" "${bashrc}"
+      else
+        echo "Configuring SHARED_SCRIPTS_DIR env var in  Debian Flavoured OS ${bashrc}"
+        sharedScriptsDirInsertionPoint="# for examples"
+        sharedScriptsDirInsertionText="${sharedScriptsDirInsertionPoint}\n\nexport SHARED_SCRIPTS_DIR=${sharedScriptsDir}"
+        sharedScriptsDirInsertionPointRegPattern=$(echo "${sharedScriptsDirInsertionPoint}" | sed "s|[.]|\.|g")
+        sed -i "s|${sharedScriptsDirInsertionPointRegPattern}|${sharedScriptsDirInsertionText}|g" "${bashrc}"
+
+      fi
+    else
+      echo "NO matching entry for Regex pattern ${sharedScriptsDirRegPattern} found in ${bashrc}"
+    fi
+  else
+    echo "Found SHARED_SCRIPTS_DIR env var in ${bashrc}"
+
+    sharedScriptsDirRegPattern=$(echo "${sharedScriptsDir}" | sed "s|/|\/|g")
+    sharedScriptsDirRegPattern="export SHARED_SCRIPTS_DIR=${sharedScriptsDirRegPattern}"
+    sharedScriptsDirInsertionPointRegPattern="^export SHARED_SCRIPTS_DIR=.*$"
+    sharedScriptsDirInsertionText="export SHARED_SCRIPTS_DIR=${sharedScriptsDir}"
+    if grep -iP "${sharedScriptsDirRegPattern}" "${bashrc}" ; then
+      echo "Updating SHARED_SCRIPTS_DIR env var in ${bashrc}"
+      sed -i "s|${sharedScriptsDirInsertionPointRegPattern}|${sharedScriptsDirInsertionText}|g" "${bashrc}"
+    fi
+  fi
+
 }
 
 # Installs wget
@@ -913,8 +1233,6 @@ install_and_configure_dns_server(){
   echo "Finished configuring and installing DNS server ..."
 }
 
-
-
 # Configures a host Dynamic DNS client. This means that the configured host/client will send Ip and name updates to
 # the DNS server
 # Args:
@@ -1081,18 +1399,15 @@ install_google_chrome () {
 #   $1 (hostname): the hostname of the host being configured e.g. mainframe
 configure_hostname () {
   # Configure the hostname
-  echo "Configuring the hostname in /etc/hostname ..."
+  echo "Configuring the hostname in  ..."
   local hostname=$1
-  local hostnameFile=/etc/hostname
 
   if [ -z "$hostname" ]; then
      print_stack_trace "The hostname of the server being configured is required. Please supply the hostname as arg 1"
      return 1
   fi
 
-  echo "Backing up $hostnameFile ..."
-  backup_file $hostnameFile
-  echo "$hostname" > /etc/hostname
+  hostnamectl set-hostname "$hostname"
   echo "Finished configuring the hostname in $hostnameFile ..."
 }
 
@@ -1100,10 +1415,12 @@ configure_hostname () {
 # Args:
 #   $1 (gatewayIpAddress): the ip address of the default gateway e.g. 192.168.0.1
 #   $2 (hostname): the hostname of the host being configured e.g. mainframe
+#   $3 (nic): required if configuring default GW for ubuntu 18.04 or later
 configure_default_gateway() {
   echo "Configuring the default gateway ..."
   local gatewayIpAddress=$1
   local hostname=$2
+  local nic=$3
 
   if [ -z "$gatewayIpAddress" ]; then
       print_stack_trace "The gateway ip address is required. Please supply the gateway ip address as arg 1"
@@ -1115,6 +1432,10 @@ configure_default_gateway() {
      return 1
   fi
 
+  if [ -z "${nic}" ] && is_ubuntu_18_04_or_later; then
+    print_stack_trace "The NIC (network interface card) is required for default gateway configuration of Ubuntu 18.04 or later. Please supply the NIC as arg 3"
+    return -1
+  fi
 
   local flavour
   get_os_flavour flavour
@@ -1126,37 +1447,73 @@ configure_default_gateway() {
       echo "NETWORKING=yes
 HOSTNAME=$hostname
 GATEWAY=$gatewayIpAddress" > $networkFile
+
+  elif is_ubuntu_18_04_or_later; then
+    local netplanConfig=/etc/netplan/00-installer-config.yaml
+    local netplanPattern="routes:"
+    local netPlanGatewayInsertionPointPattern="^\s*${nic}:\s*$"
+    local netplanDefaultGWStanza
+    backup_file $netplanConfig
+
+    if ! grep -iP "${netplanPattern}" "${netplanConfig}"; then
+      netplanDefaultGWStanza=$(eval 'cat << EOF
+      routes:
+        - to: 0.0.0.0/0
+          via: ${gatewayIpAddress}
+EOF
+')
+    insert_after "$netplanConfig" "${netPlanGatewayInsertionPointPattern}" "${netplanDefaultGWStanza}"
+
+    else
+      # matches "   via: IP_ADDRESS"
+      netplanPattern="^\s*via:\s*[0-9]{1,3}(\.[0-9]{1,3}){3,3}\s*$"
+      netplanDefaultGWStanza=$(eval 'cat << EOF
+          via: ${gatewayIpAddress}
+EOF
+')
+      sed -i -r "s|${netplanPattern}|${netplanDefaultGWStanza}|" "${netplanConfig}"
+
+    fi
   elif [ "$flavour" == "debian" ]; then
     echo "Default Gateway not configuration not supported in Debian based systems. Skipping"
   fi
 
 }
 
-# Configures /etc/resolv.conf
+# Configures /etc/resolv.conf for fedora flavour OSes and /etc/netplan/01-network-manager-all.yaml for Ubuntu
 # Args:
 # $1 (hostname) : the hostname of the host being configured /etc/resolv.conf
-# $2 (useLocalDNS) : if this is set to 'y', will add local nameserver  to /etc/resolv.conf
-# $3 (localNameserverIp): the ip address of the local nameserver. Only required if useLocalDNS ='y'
-# $4 (localDNSDomainName): the domain name of the local nameserver e.g homelan.com. Only required if useLocalDNS ='y'
+# $2 (nic) : The NIC of being configured
+# $3 (useLocalDNS) : if this is set to 'y', will add local nameserver  to /etc/resolv.conf
+# $4 (localNameserverIp): the ip address of the local nameserver. Only required if useLocalDNS ='y'
+# $5 (localDNSDomainName): the domain name of the local nameserver e.g homelan.com. Only required if useLocalDNS ='y'
 
-configure_resolv_conf(){
+create_nameserver_config(){
   local hostname=$1
-  local useLocalDNS=$2
-  local localNameserverIp=$3
-  local localDNSDomainName=$4
-  local resolv_conf=/etc/resolv.conf
-  echo "Creating $resolv_conf ..."
-  backup_file $resolv_conf
+  local nic=$2
+  local useLocalDNS=$3
+  local localNameserverIp=$4
+  local localDNSDomainName=$5
+  local localDnsSearchStanza
+
+  local resolv_conf
+  echo "Creating nameservers config file  ..."
 
   while [ -z "$hostname" ]
       do
-        echo  "hostname is required to configure $resolv_conf"
+        echo  "hostname is required to create nameserver config"
         read hostname
         add_empty_line
       done
 
-  if is_true "$useLocalDNS"  ; then
+  while [ -z "$nic" ]
+      do
+        echo  "NIC is required to create nameserver config"
+        read nic
+        add_empty_line
+      done
 
+  if is_true "$useLocalDNS"  ; then
 
     while [ -z "$localNameserverIp" ]
       do
@@ -1165,18 +1522,58 @@ configure_resolv_conf(){
         add_empty_line
       done
 
-    while [ -z "$localNameserverIp" ]
+    while [ -z "$localDNSDomainName" ]
       do
         echo  "Local DNS domain name (e.g. homelan.com)  is required to configure local DNS"
         read localDNSDomainName
         add_empty_line
       done
 
-    local localDnsSearchStanza="search $localDNSDomainName"
+    localDnsSearchStanza="search $localDNSDomainName"
     localDnsNameserverStanza="nameserver $localNameserverIp"
   fi
 
-  echo "# $HOSTNAME resolv.conf
+  local osName
+  local osVersion
+
+  get_os_version osVersion
+  get_os_name osName
+
+# For Ubuntu v18.04 and above, we use netplan to configure the nameservers
+  if is_ubuntu_18_04_or_later ; then
+    resolv_conf=/etc/netplan/00-installer-config.yaml
+    echo "Creating ${osName} ${osVersion} nameservers config file $resolv_conf ..."
+    backup_file "$resolv_conf"
+    local nameserverIPStanza="addresses: [8.8.8.8, 8.8.1.1]"
+    localDnsSearchStanza="search: [$localDNSDomainName]"
+
+    if is_true "$useLocalDNS"  ; then
+      nameserverIPStanza="addresses: [${localNameserverIp}, 8.8.8.8, 8.8.1.1]"
+      localDnsSearchStanza="search: [$localDNSDomainName]"
+    fi
+
+   #TODO
+   # Update to configure static ip addresses Ubuntu 18.04 and above
+   # See https://www.cloudsavvyit.com/4240/how-to-set-dns-search-order-in-ubuntu-18-04-using-netplan/
+   # and https://www.linuxjournal.com/content/have-plan-netplan
+    cat <<-EOF > $resolv_conf
+network:
+  version: 2
+  ethernets:
+    $nic:
+      dhcp4: true
+      nameservers:
+        ${nameserverIPStanza}
+        ${localDnsSearchStanza}
+EOF
+    sudo netplan apply
+  else
+    resolv_conf=/etc/resolv.conf
+    echo "Creating nameservers config file $resolv_conf ..."
+    backup_file $resolv_conf
+
+    cat <<-EOF > $resolv_conf
+# $HOSTNAME resolv.conf
 
 $localDnsSearchStanza
 $localDnsNameserverStanza
@@ -1187,8 +1584,8 @@ nameserver 8.8.1.1
 
 # Cloudflare name servers i.e Cloudflare DNS Servers
 #nameserver 1.1.1.1
-" > $resolv_conf
-
+EOF
+  fi
   echo "Finished creating $resolv_conf"
 }
 
@@ -1218,7 +1615,7 @@ configure_wpa_supplicant() {
     get_nic_config_file $nic $ssid
     backup_file $nicConfigFile
     if [ -f "$nicConfigFile" ]; then
-        echo "updating $$nicConfigBasePath config $nicConfigFile with networking details ..."
+        echo "updating $nicConfigBasePath config $nicConfigFile with networking details ..."
         if [ -f "$BACKED_UP_FILE" ]; then
             local nicConfigFile_BACKUP=$(echo $nicConfigFile | sed -e 's/ifcfg/__ifcfg/gI')
             echo "renaming $BACKED_UP_FILE to $nicConfigFile_BACKUP"
@@ -1354,6 +1751,14 @@ configure_raid() {
 
 install_zsh_and_oh_my_zsh() {
 
+  local userUnderConfig=$1
+  local userUnderConfigHome=$2
+  local  vconsoleConf=$3
+  local zshPkg=("zsh")
+
+  local bashProfile
+  get_profile_file bashProfile
+
   if [ -z $userUnderConfig ] ; then
     print_stack_trace "The username of the user under configuration is required. Please provide the username for the user under configuration"
     return 1
@@ -1368,14 +1773,16 @@ install_zsh_and_oh_my_zsh() {
         local msg="The path to vconsole configuration is required. Please provide the path to vconfiguration"
         msg=$msg$'\n'"If your are using a Fedora flavoured system such as Centos, RHEL or AlmaLinux, this will usually be /etc/vconsole.conf"
         print_stack_trace "$msg"
+        # TODO
+        # Uncommment the line below when you have fixed powerline TTY fonts for Debian Ubuntu
         return 1
     fi
 
-  local userUnderConfig=$1
-  local userUnderConfigHome=$2
+
   # Install Oh My ZSH
   echo "Installing zsh ..."
-  yum install zsh -y
+  local
+  install_packages zshPkg
   chsh -s /bin/zsh $userUnderConfig
   echo "Finished installing zsh ..."
 
@@ -1439,15 +1846,18 @@ install_zsh_and_oh_my_zsh() {
   echo "Creating custom $userUnderConfigHome/.zshrc ..."
   backup_file $userUnderConfigHome/.zshrc
 
-  echo '# If you come from bash you might have to change your $PATH.
-# export PATH=$HOME/bin:/usr/local/bin:$PATH
+
+
+  cat <<- EOF > $userUnderConfigHome/.zshrc
+# If you come from bash you might have to change your \$PATH.
+# export PATH=\$HOME/bin:/usr/local/bin:\$PATH
 
 # Path to your oh-my-zsh installation.
-export ZSH="$HOME/.oh-my-zsh"
+export ZSH="\$HOME/.oh-my-zsh"
 
 # Set name of the theme to load --- if set to "random", it will
 # load a random theme each time oh-my-zsh is loaded, in which case,
-# to know which specific one was loaded, run: echo $RANDOM_THEME
+# to know which specific one was loaded, run: echo \$RANDOM_THEME
 # See https://github.com/ohmyzsh/ohmyzsh/wiki/Themes
 #ZSH_THEME="robbyrussell"
 ZSH_THEME="spaceship"
@@ -1460,7 +1870,7 @@ SPACESHIP_BATTERY_SHOW=always
 
 # Set list of themes to pick from when loading at random
 # Setting this variable when ZSH_THEME=random will cause zsh to load
-# a theme from this variable instead of looking in $ZSH/themes/
+# a theme from this variable instead of looking in \$ZSH/themes/
 # If set to an empty array, this variable will have no effect.
 # ZSH_THEME_RANDOM_CANDIDATES=( "robbyrussell" "agnoster" )
 
@@ -1508,12 +1918,12 @@ SPACESHIP_BATTERY_SHOW=always
 # see "man strftime" for details.
 # HIST_STAMPS="mm/dd/yyyy"
 
-# Would you like to use another custom folder than $ZSH/custom?
+# Would you like to use another custom folder than \$ZSH/custom?
 # ZSH_CUSTOM=/path/to/new-custom-folder
 
 # Which plugins would you like to load?
-# Standard plugins can be found in $ZSH/plugins/
-# Custom plugins may be added to $ZSH_CUSTOM/plugins/
+# Standard plugins can be found in \$ZSH/plugins/
+# Custom plugins may be added to \$ZSH_CUSTOM/plugins/
 # Example format: plugins=(rails git textmate ruby lighthouse)
 # Add wisely, as too many plugins slow down shell startup.
 #plugins=(git)
@@ -1533,17 +1943,17 @@ plugins=(
 	zsh_reload
 )
 
-source $ZSH/oh-my-zsh.sh
+source \$ZSH/oh-my-zsh.sh
 
 # User configuration
 
-# export MANPATH="/usr/local/man:$MANPATH"
+# export MANPATH="/usr/local/man:\$MANPATH"
 
 # You may need to manually set your language environment
 # export LANG=en_US.UTF-8
 
 # Preferred editor for local and remote sessions
-# if [[ -n $SSH_CONNECTION ]]; then
+# if [[ -n \$SSH_CONNECTION ]]; then
 #   export EDITOR=''vim''
 # else
 #   export EDITOR=''mvim''
@@ -1561,9 +1971,9 @@ source $ZSH/oh-my-zsh.sh
 # alias zshconfig="mate ~/.zshrc"
 # alias ohmyzsh="mate ~/.oh-my-zsh"
 
-# Source ~/.bash_profile
+# Source profile e.g. ~/.bash_profile
 
-source ~/.bash_profile
+source "${bashProfile}"
 
 # If we are in the TTY terminal console, set the font to ter-powerline-v14n
 if tty | grep -iP "^/dev/tty[1-6]{1,1}" ; then
@@ -1581,7 +1991,7 @@ bindkey "[D" backward-word
 # Delete Word Backword bound to Alt+Backspace
 # bindkey "^[^?" backward-kill-word
 
-' > $userUnderConfigHome/.zshrc
+EOF
 
   HOME=$origHome
 
@@ -2750,6 +3160,8 @@ update_vm_config_in_vm_autostart_config (){
 
 
 # TODO
+# Fix Installing powerline TTY fonts for Debian / Ubuntu
 # Complete DNS Configuration for Fedora and Centos
 # Do Default GW for debian based systems
 # Create Systemd service and timer
+
