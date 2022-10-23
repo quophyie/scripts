@@ -23,6 +23,7 @@ The script first script (i.e `configure_centos_linux_mainframe_post_new_install_
 16) Installs Bind9 (named) DNS server for name resolution on a local network. The DNS server can be configured to allow dynamic DNS 
 updates if you select the options to allow other hosts / clients to dynamically the DNS server (i.e the mainframe host being configured) with their IPs and names
 17) It gives you the opportunity to set the default run level of the server (multi-user.target is recommended for advanced server admins)
+18) Provides functions to configure auto started VMWare virtual machines
 
 ## Usage
 
