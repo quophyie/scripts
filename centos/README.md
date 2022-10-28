@@ -57,11 +57,11 @@ ssh dman@192.168.0.2
 ```
 
 
-The second script (i.e `configure_linux_vm_host.sh`) is used to configure hosts that do NOT need to be the mainframe (i.e. the machine hosting the VMs)
+The second script (i.e `configure_linux_vm_host.sh`) is used to configure hosts that do NOT need to be the mainframe (e.g. the machine hosting the VMs)
 This script performs the following tasks
 1) Configure the hostname for the host / machine
 2) Update **`/etc/resolv.conf`** with google and cloudflare DNS as the nameservers. It also updates the /etc/resolv.conf with the details of the local DNS nameserver (e.g. mainframe) if that local DNS option is selected (e.g. if mainframe is configured as the local the DNS nameserver) 
-3) Configures a systemd timeer and service that sends dynamic DNS updates to the local DNS server e.g. mainframe 
+3) Configures a systemd timer and service that sends dynamic DNS updates to the local DNS server e.g. mainframe 
 
 
 This second script (i.e `configure_linux_vm_host.sh`) must be run with **`sudo`** i.e.
