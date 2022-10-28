@@ -74,8 +74,10 @@ This function must be NOT executed by user 'root'
 #                   i.e. the $ MUST NOT prefix the name of the variable
 #   Example usage get_os_flavour flavour
 get_os_flavour() {
+  # Sets SHELL option so that script doesnt exit if arrayContains return non zero exit code
+  set +e
   source /etc/os-release && IFS=', ' read -r -a os_flavours <<< "$ID_LIKE"
-  echo "ID_LIKE ==> ${ID_LIKE}"
+
   local fedora_flavours=("rhel" "centos" "fedora" )
   local debian_flavours=("debian")
   local __flavour__
@@ -84,25 +86,24 @@ get_os_flavour() {
   for flavour in "${os_flavours[@]}"
     do
       local funRes=1
-      arrayContains "$flavour" "${fedora_flavours[@]}"
+      arrayContains "$flavour" fedora_flavours
       funRes=$?
-
       if [ $funRes -eq 0 ] ; then
         __flavour__="fedora"
         break
       fi
 
-      arrayContains "$flavour" "${debian_flavours[@]}"
+      arrayContains "$flavour" debian_flavours
       funRes=$?
-
       if [ $funRes -eq 0 ] ; then
         __flavour__="debian"
         break
       fi
     done
   unset IFS # or set back to original IFS if previously set
-  echo "os flavour ===> $__flavour__"
   return_function_result "$__flavour__" "$__returnVariable__"
+  # Sets SHELL option so that script exit if commands fail
+  set -e
 }
 
 # Returns  the version of the OS
@@ -239,6 +240,7 @@ print_stack_trace() {
   local stackStartDepth=2
   get_stack_trace $stackStartDepth stackTrace "$prefixMessage" "$suffixMessage"
   echo "${stackTrace}"
+  exit 1
 }
 # Checks if the supplied cidr is valid
 #  Args:
@@ -400,6 +402,27 @@ is_vm_in_vm_autostart_config () {
   return 1
 }
 
+# Will return true i.e. 0 if the supplied nic provided is a wireless nic. False otherwise
+# Args:
+#     $1 (nic): the name of the nic to check
+is_wireless_nic (){
+  local __nic__=$1
+  local __foundWirelessNic__
+  __foundWirelessNic__=$(iw dev | awk '$1=="Interface"{print $2}')
+
+  if  [ -z "$__nic__" ]; then
+    local stackSuffixMsg="Please supply nic as arg 1"
+    print_stack_trace "Network interface name (nic) is required as arg 1" "$stackSuffixMsg"
+    return 1
+  fi
+
+  if [ -n "$__foundWirelessNic__" ] && [ "$__nic__" == "$__foundWirelessNic__" ]; then
+    return 0;
+  else
+    return 1
+  fi
+}
+
 # Checks if the supplied packages are installed.
 # Will return 0 (true) if all the packages in the supplied list are installed and 1 (false) if at least one is not installed.
 # The packages which are not installed will be returned in $2 (i.e OUT notInstalled) if supplied
@@ -525,20 +548,20 @@ print_os_flavour() {
 #  $1 (element): element to search for
 #  $2 (array): the array to search
 # Example usage:  array=("something to search for" "a string" "test2000")
-                 # arrayContains "a string" "${array[@]}"
+                 # arrayContains "a string" array
                  # echo $?
                  # 0
-                 # arrayContains "blaha" "${array[@]}"
+                 # arrayContains "blaha" array
                  # echo $?
                  # 1
 
 
 arrayContains () {
   local elem=$1
-  local array=$2
+  local array
+  makeTrueCloneOfVariable "${2}" array
   for item in "${array[@]}"; do
-      if [ $elem == "$item" ]; then
-        echo "$elem present in the array";
+      if [ "${elem}" == "$item" ]; then
         return 0
       fi
   done
@@ -678,7 +701,21 @@ get_profile_file() {
 
     local  __resultvar=$1
     local profile
-    local zshProfile="${HOME}/.zshrc"
+    local userHome=${HOME}
+     # shift one places
+      shift
+
+      while [ $# -gt 0 ]; do
+        case "$1" in
+          --user=*)
+            userHome=/home/"${1#*=}"
+            ;;
+          *)
+        esac
+        shift
+      done
+
+    local zshProfile="${userHome}/.zshrc"
 
     if [ "${SHELL}" == "/bin/zsh" ]; then
 
@@ -686,10 +723,10 @@ get_profile_file() {
 
     elif [ "${SHELL}" == "/bin/bash" ]; then
 
-        if [ -f "${HOME}/.bash_profile" ]; then
-          profile="${HOME}/.bash_profile"
-        elif [ -f "${HOME}/.profile" ]; then
-          profile="${HOME}/.profile"
+        if [ -f "${userHome}/.bash_profile" ]; then
+          profile="${userHome}/.bash_profile"
+        elif [ -f "${userHome}/.profile" ]; then
+          profile="${userHome}/.profile"
         fi
     fi
 
@@ -853,6 +890,7 @@ configure_shared_scripts_dir_env_var(){
   fi
 }
 
+
 # Configures the shell profiles for a user by setting up environment variables, functions,
 # aliases etc
 # Args:
@@ -967,9 +1005,16 @@ install_git() {
 # $1 (userUnderConfigHome) : The $HOME of the user who for whom the powerline fonts are to be installed for
 # $2 (vconsoleConf) : The path to the console configuration file. Usually /etc/vconsole.conf
 install_powerline_fonts () {
-    echo "Installing Powerline Fonts ..."
+  echo "Installing Powerline Fonts ..."
   local userUnderConfigHome=$1
   local vconsoleConf=$2
+  local osName
+  local osVersion
+  local flavour
+
+  get_os_version osVersion
+  get_os_name osName
+  get_os_flavour flavour
   if [ -z "$userUnderConfigHome" ]; then
       print_stack_trace "The USER_UNDER_CONFIG is required e.g. /home/dman. Please supply the USER_UNDER_CONFIG as arg 1"
       return 1
@@ -980,21 +1025,26 @@ install_powerline_fonts () {
      return 1
   fi
 
-    local fonts_install_dir=$userUnderConfigHome/fonts
-    local tty_consolefonts_dir=/usr/lib/kbd/consolefonts
+    local fonts_download_dir=$userUnderConfigHome/fonts
+    local tty_consolefonts_dir
     local powerline_tty_font="ter-powerline-v14n"
     local vconsoleConf=$2
-    delete_dir "$fonts_install_dir"
-    git clone https://github.com/powerline/fonts.git --depth=1 --quiet $fonts_install_dir
+    delete_dir "$fonts_download_dir"
+    git clone https://github.com/powerline/fonts.git --depth=1 --quiet $fonts_download_dir
     # install
     # Set HOME to $userUnderConfigHome so that we dont accidentally install into root's HOME i.e /root
     local origHome=$HOME
     HOME=$userUnderConfigHome
-    cd $fonts_install_dir
+    cd $fonts_download_dir
     ./install.sh
-    echo "Installing Powerline TTY terminal console fonts ... "
+    echo "Installing Powerline TTY terminal console fonts on ${osName} ${osVersion} ... "
     backup_file $vconsoleConf
 
+    if [ "${flavour}" == "fedora" ]; then
+      tty_consolefonts_dir=/usr/lib/kbd/consolefonts
+    elif [ "${flavour}" == "debian" ]; then
+      tty_consolefonts_dir=/usr/share/consolefonts
+    fi
     # Check and make sure that we have the Terminus/PSF in the fonts dir before going ahead with Terminal Fonts Install
     # NOTE: Only the fonts in Terminus directory (particularly the fonts in Terminus/PSF in the fonts directory) of
     # powerline fonts can be used in TTY terminals (i.e. Alt F1 - F6 terminal consoles).
@@ -1003,21 +1053,33 @@ install_powerline_fonts () {
     if  [ -d "Terminus/PSF" ] ; then
       sudo find "." \( -name "$prefix*.psf.gz" \) -type f -print0 | xargs -0 -n1 -I % sudo cp "%" "$tty_consolefonts_dir"
 
-      if grep -iP "^FONT=.*$" $vconsoleConf ; then
-        # Delete the FONT stanza in /etc/vconsole.conf and replace it with $powerline_tty_font
-        sed -i '/^FONT=.*$/d' $vconsoleConf
-        echo "Updating $vconsoleConf with font $powerline_tty_font"
-        echo "FONT=\"$powerline_tty_font\"" >> $vconsoleConf
-      else
-        echo "Font not set in $vconsoleConf "
-        echo "Adding font $powerline_tty_font to $vconsoleConf"
-        echo "FONT=\"$powerline_tty_font\"" >> $vconsoleConf
+      if [ "$flavour" == "fedora" ]; then
+        if grep -iP "^FONT=.*$" $vconsoleConf ; then
+          # Delete the FONT stanza in /etc/vconsole.conf and replace it with $powerline_tty_font
+          sed -i '/^FONT=.*$/d' $vconsoleConf
+          echo "Updating $vconsoleConf with font $powerline_tty_font"
+          echo "FONT=\"$powerline_tty_font\"" >> $vconsoleConf
+        else
+          echo "Font not set in $vconsoleConf "
+          echo "Adding font $powerline_tty_font to $vconsoleConf"
+          echo "FONT=\"$powerline_tty_font\"" >> $vconsoleConf
+        fi
+      elif [ "$flavour" == "debian" ]; then
+        if grep -iP "^FONTFACE=.*$" $vconsoleConf ; then
+          # Delete the FONT stanza in /etc/vconsole.conf and replace it with $powerline_tty_font
+          sed -i '/^FONTFACE=.*$/d' $vconsoleConf
+          echo "Updating $vconsoleConf with font $powerline_tty_font"
+          echo "FONTFACE=\"$powerline_tty_font\"" >> $vconsoleConf
+        else
+          echo "Font not set in $vconsoleConf "
+          echo "Adding font $powerline_tty_font to $vconsoleConf"
+          echo "FONTFACE=\"$powerline_tty_font\"" >> $vconsoleConf
+        fi
       fi
-
       setfont $powerline_tty_font
-      echo "Finished Installing Powerline TTY terminal console fonts ... "
+      echo "Finished Installing Powerline TTY terminal console fonts on ${osName} ${osVersion} ... "
     else
-      echo "$PWD/Terminus/PSF not found!!. Skipping Powerline TTY fonts installation ... "
+      echo "$PWD/Terminus/PSF not found!!. Skipping Powerline TTY fonts installation on on ${osName} ${osVersion} ... "
     fi
     # clean-up a bit
     cd ..
@@ -1069,7 +1131,7 @@ install_bind9() {
     sudo dnf install bind bind-utils -y
   elif [ "$flavour" == "debian" ]; then
     sudo apt-get update
-    sudo apt-get -y install bind bind-utils
+    sudo apt-get -y install bind9 bind9-utils
   else
     echo "Unknown OS flavor $flavour. Skipping Bind9 installation..."
     return 1
@@ -1153,6 +1215,28 @@ install_nmcli(){
     install_packages package
     result=$?
     echo "Finished installing nmcli"
+  fi
+  return $result
+}
+
+install_NetworkManager(){
+  local package
+  local result=1
+  local flavour
+
+  get_os_flavour flavour
+  if [ "$flavour" == "fedora" ] ; then
+    package=("NetworkManager")
+  elif [ "$flavour" == "debian" ]; then
+    package=("network-manager")
+  fi
+
+  if ! is_package_installed "${package[0]}" ; then
+    echo "Installing Network Manager ..."
+    echo "Network Manager package -> ${package[*]} "
+    install_packages package
+    result=$?
+    echo "Finished installing Network Manager"
   fi
   return $result
 }
@@ -1345,7 +1429,7 @@ configure_dynamic_dns_client () {
   #   $4 (ddnsUpdateKey [Default: /etc/named/ddnsupdate.key]) - The path to the key that is used to update the dns.
 
   #   The key should be obtained from the admin of the DNS server
-  create_dns_publisher_systemd_timer "$dnsServerName" "$nic" "$dnsDomain" "$ddnsUpdateKey"
+  create_dns_publisher_systemd_timer "$dnsServerName" "$dnsServerIp" "$nic" "$dnsDomain" "$ddnsUpdateKey"
 
   echo "Finished configuring dynamic dns client"
 
@@ -1411,6 +1495,352 @@ configure_hostname () {
   echo "Finished configuring the hostname in $hostnameFile ..."
 }
 
+# Creates a netplan configuration for  Ubuntu 18.04 or later
+# Args:
+#   $1 (nic): the name of the NIC being configured for networking e.g.wlp7s0.
+#     This function will automatically determine if the NIC is an ethernet or wireless NIC
+#   --renderer: The netplan renderer (backend) to use.
+#               The supported renderers are "networkd" (i.e Systemd-networkd) and "NetworkManager"
+#               Default=NetworkManager
+#   --use_dhcp: If true the, the IP assigned to the NIC will be obtained from the DHCP server.
+#                 If false, it indicates that we need to use a static ip
+#               Default=y
+#   --nic_ip: Required if useDhcp is false. The ip address of the NIC.
+#   --ssid: Required if nic is a wireless NIC. The SSID/Access point of the Wifi to connect to
+#   --wifi_password: Required if nic is a wireless NIC. Wifi password for the SSID/Access point of the Wifi to connect to
+#   Example Usage:
+#    Create netplan config for ethernet card with static IP
+#       create_netplan_config "ens01"  --use_dhcp=no --nic_ip="192.168.0.2"
+#     Create netplan config for wireless card with IP from  DHCP server
+#       configure_networking "wlp7s0" --ssid="My_WIFI_AP" --wifi_password="MyWifiPassword"
+
+create_netplan_config(){
+  local nic=${1}
+  local useDhcp="y"
+  local renderer="NetworkManager"
+  local nic_ip
+  local ssid
+  local wifiPassword
+
+  local osName
+  local osVersion
+  local flavour
+
+  get_os_version osVersion
+  get_os_name osName
+  get_os_flavour flavour
+
+  if is_ubuntu_18_04_or_later; then
+      if [ -z "${nic}" ] ; then
+        print_stack_trace "The NIC (network interface card) is required for network configuration"
+        return 1
+      fi
+
+    shift
+
+    while [ $# -gt 0 ]; do
+      case "$1" in
+        --renderer=*)
+          renderer="${1#*=}"
+          ;;
+        --use_dhcp=*)
+          useDhcp="${1#*=}"
+          ;;
+        --nic_ip=*)
+          nic_ip="${1#*=}"
+          ;;
+        --ssid=*)
+          ssid="${1#*=}"
+          ;;
+        --wifi_password=*)
+          wifiPassword="${1#*=}"
+          ;;
+        *)
+      esac
+      shift
+    done
+
+    if [ "${renderer}" != "networkd" ] && [ "${renderer}" != "NetworkManager" ]; then
+      local errMsgSuffix="Please supply 'networkd' or 'NetworkManager' as the netplan renderer in the --renderer argument"
+      print_stack_trace "Unsupported netplan renderer ${renderer}"  "${errMsgSuffix}"
+    fi
+    if is_wireless_nic "$nic";  then
+
+      if [ -z "${ssid}" ]; then
+        local errMsgSuffix="Please supply Access Point / SSID with --ssid argument"
+        print_stack_trace "An Access Point / SSID is required for wireless NIC ${nic} Wifi connection"  "${errMsgSuffix}"
+        return 1
+      fi
+
+      if [ -z "${wifiPassword}" ]; then
+        local errMsgSuffix="Please supply wifi password with --wifi_password argument"
+        print_stack_trace "An wifi password is required for wireless NIC ${nic} Wifi connection" "${errMsgSuffix}"
+        return 1
+      fi
+    fi
+
+    local netplanGatewayPlaceholder="# ${nic}_REPLACE_THIS_PLACEHOLDER_WITH_NETPLAN_GATEWAY_CONFIG"
+    local netplanNameserverPlaceholder="# ${nic}_REPLACE_THIS_PLACEHOLDER_WITH_NETPLAN_NAMESERVER_CONFIG"
+    local netplanNICIpConfigStanza
+
+    if is_true "${useDhcp}"; then
+      if [ "${renderer}" == "networkd" ]; then
+        netplanNICIpConfigStanza=$(eval 'cat << EOF
+      dhcp4: yes
+      dhcp6: yes
+EOF')
+      fi
+      if [ "${renderer}" == "NetworkManager" ]; then
+        local cardIp=${nic_ip}
+        if [ -z "${cardIp}" ]; then
+          get_ip "${nic}" cardIp
+        fi
+        #Note* As of 18/05/2020 Network Manager doesn’t respect the Netplan option nameservers: addresses [8.8.8.8,8.8.4.4] option
+        # even when you specify dhcp4-overrides: use-dns: false, it still uses (and give priority to) the default DHCP DNS servers.
+        # This renders any custom DNS servers redundant. The only way around this AFAIK is to specify the Ethernet connection as static
+        # See https://www.ricmedia.com/tutorials/set-custom-dns-servers-on-ubuntu-18-or-20#dns-netplan-static-ip for more info
+        echo "netplan DOES NOT respect nameservers option when NetworkManager is used as a netplan render with DHCP"
+        echo "netplan will prioritiese DHCP supplied nameservers and renders any custom DNS servers redundant"
+        echo "Hence to get around this restriction, this script will set the IP address of network card ${nic} to use a static IP address of ${cardIp} to so that NetworkManager respects the nameservers option"
+
+        netplanNICIpConfigStanza=$(eval 'cat << EOF
+      dhcp4: no
+      dhcp6: no
+      addresses:
+        - ${cardIp}/24
+EOF')
+      fi
+    else
+      netplanNICIpConfigStanza=$(eval 'cat << EOF
+      dhcp4: no
+      dhcp6: no
+      addresses:
+        - ${nic_ip}/24
+EOF')
+    fi
+
+
+    if ! is_wireless_nic "$nic"; then
+      netplanNicStanza=$(eval 'cat << EOF
+  ethernets:
+    ${nic}:
+${netplanNICIpConfigStanza}
+${netplanGatewayPlaceholder}
+${netplanNameserverPlaceholder}
+EOF
+')
+    else
+      netplanNicStanza=$(eval 'cat << EOF
+  wifis:
+    ${nic}:
+${netplanNICIpConfigStanza}
+      access-points:
+        ""${ssid}"":
+            password: ""${wifiPassword}""
+${netplanGatewayPlaceholder}
+${netplanNameserverPlaceholder}
+EOF
+')
+    fi
+
+
+      local netplanConfig=/etc/netplan/00-installer-config.yaml
+      echo "Creating ${osName} ${osVersion} netplan config file ${netplanConfig} ..."
+      backup_file "${netplanConfig}"
+      cat <<-EOF > $netplanConfig
+# Quantal Inc supplied netplan  configuration
+network:
+  version: 2
+  renderer: ${renderer}
+${netplanNicStanza}
+EOF
+      echo "Finished creating ${osName} ${osVersion} netplan config file ${netplanConfig} ..."
+  else
+    local errMsg="netplan configuration is not applicable for ${osName} ${osVersion}. Skipping ...\nnetplan configuration is Ubuntu flavoured systems"
+    print_stack_trace "${errMsg}"
+  fi
+
+}
+
+# Configures Networking for the supplied nic
+# Args:
+#   $1 (nic): the name of the NIC being configured for networking e.g.wlp7s0.
+#           This function will automatically determine if the NIC is an ethernet or wireless NIC
+#   $2 (hostname): the hostname of the host being configured e.g. mainframe
+#   --renderer: The netplan renderer (backend) to use.
+#               The supported renderers are "networkd" (i.e Systemd-networkd) and "NetworkManager"
+#               Default=NetworkManager
+#   --use_dhcp: If true the, the IP assigned to the NIC will be obtained from the DHCP server.
+#                 If false, it indicates that we need to use a static ip
+#               Default=y
+#   --use_local_dns : if this is set to 'y', will add local nameserver  to /etc/resolv.conf or /etc/netplan/00-installer-config.yaml
+#                       for ubuntu 18.04 and above
+#               Default=y
+#   --gateway: Required if useDhcp is false. The ip address of the default gateway e.g. 192.168.0.1.
+#   --nic_ip: Required if useDhcp is false. The ip address of the NIC.
+#   --ssid: Required if nic is a wireless NIC. The SSID/Access point of the Wifi to connect to
+#   --wifi_password: Required if nic is a wireless NIC. Wifi password for the SSID/Access point of the Wifi to connect to
+#   --local_nameserver_ip: Required if useLocalDNS is true. The ip address of the local nameserver. Only required if useLocalDNS ='y'
+#   --local_dns_domain_name: Required if useLocalDNS is true. the domain name of the local nameserver e.g homelan.com. Only required if useLocalDNS ='y'
+#   Example Usage:
+#     Mainframe Config Example. Host with Ethernet NIC and Static IP:
+#       configure_networking "ens01" "mainframe" --use_dhcp=no --nic_ip="192.168.0.2" --gateway="192.168.0.1" --use_local_dns=no
+#     Mainframe Config Example. Host with Wireless NIC and Static IP:
+#       configure_networking "wlp7s0" "mainframe" --use_dhcp=no --nic_ip="192.168.0.2" --gateway="192.168.0.1" --ssid="My_WIFI_AP" --wifi_password="MyWifiPassword" --use_local_dns=no
+#     Client Config Example: Host using ethernet and DHCP IP
+#       configure_networking "ens01" "myhost" --local_nameserver_ip="192.168.0.2" --local_dns_domain_name="homelan.com"
+#     We dont supply gateway as it should be supplied by DHCP automatically. However, you can supply if you want to
+#     Client Config Example: Host using wireless and DHCP IP
+#       configure_networking "wlp7s0" "myhost" --ssid="My_WIFI_AP" --wifi_password="MyWifiPassword" --local_nameserver_ip="192.168.0.2" --local_dns_domain_name="homelan.com"
+#     We dont supply gateway as it should be supplied by DHCP automatically. However, you can supply if you want to
+
+configure_networking(){
+  #   -e  Exit immediately if a command exits with a non-zero status.
+  set -e
+  local nic=${1}
+  local hostname=${2}
+  local renderer="NetworkManager"
+  local useDhcp="y"
+  local useLocalDNS="y"
+  local gatewayIpAddress
+  local nic_ip
+  local ssid
+  local wifiPassword
+  local localNameserverIp
+  local localDNSDomainName
+  local netplanNicStanza
+
+
+  echo "configuring networking for NIC ${nic} on host ${hostname} ..."
+
+  if [ -z "${nic}" ] ; then
+    print_stack_trace "The NIC (network interface card) is required for network configuration"
+    return 1
+  fi
+
+  if [ -z "$hostname" ]; then
+     print_stack_trace "The hostname of the server being configured is required. Please supply the hostname as arg 2"
+     return 1
+  fi
+
+ # shift two places
+  shift;shift
+
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --renderer=*)
+        renderer="${1#*=}"
+        ;;
+      --use_dhcp=*)
+        useDhcp="${1#*=}"
+        ;;
+      --use_local_dns=*)
+        useLocalDNS="${1#*=}"
+        ;;
+      --gateway=*)
+        gatewayIpAddress="${1#*=}"
+        ;;
+      --nic_ip=*)
+        nic_ip="${1#*=}"
+        ;;
+      --ssid=*)
+        ssid="${1#*=}"
+        ;;
+      --wifi_password=*)
+        wifiPassword="${1#*=}"
+        ;;
+      --local_nameserver_ip=*)
+        localNameserverIp="${1#*=}"
+        ;;
+      --local_dns_domain_name=*)
+        localDNSDomainName="${1#*=}"
+        ;;
+      *)
+    esac
+    shift
+  done
+
+  if is_ubuntu_18_04_or_later && [ "${renderer}" != "networkd" ] && [ "${renderer}" != "NetworkManager" ]; then
+    local errMsgSuffix="Please supply 'networkd' or 'NetworkManager' as the netplan renderer in the --renderer argument"
+    print_stack_trace "Unsupported netplan renderer ${renderer}"  "${errMsgSuffix}"
+  fi
+
+  if ! is_true "$useDhcp" ; then
+    if [ -z "${nic_ip}" ]; then
+      print_stack_trace "A static IP address is required if useDhcp is true. Please supply NIC IP as arg 3"
+      return 1
+    fi
+    if [ -z "$gatewayIpAddress" ]; then
+        local errMsgSuffix="Please supply gateway with --gateway argument"
+        print_stack_trace "The gateway ip address is required for NIC with static IP. Please supply the gateway ip address" "${errMsgSuffix}"
+        return 1
+    fi
+
+  fi
+  if is_wireless_nic "$nic";  then
+
+    if [ -z "${ssid}" ]; then
+      local errMsgSuffix="Please supply Access Point / SSID with --ssid argument"
+      print_stack_trace "An Access Point / SSID is required for wireless NIC ${nic} Wifi connection"  "${errMsgSuffix}"
+      return 1
+    fi
+
+        if [ -z "${wifiPassword}" ]; then
+          local errMsgSuffix="Please supply wifi password with --wifi_password argument"
+          print_stack_trace "An wifi password is required for wireless NIC ${nic} Wifi connection" "${errMsgSuffix}"
+          return 1
+        fi
+  fi
+
+  if is_true "${useLocalDNS}" ; then
+    if [ -z "${localNameserverIp}" ]; then
+      local errMsgSuffix="Please supply local nameserver ip address with --local_nameserver_ip argument"
+      print_stack_trace "The local nameserver IP address is required if useLocalDNS is true." "${errMsgSuffix}"
+      return 1
+    fi
+
+    if   [ -z "${localDNSDomainName}" ]; then
+      local errMsgSuffix="Please supply localNameserverIp with --local_dns_domain_name argument"
+      print_stack_trace "The local local DNS domain name is required if useLocalDNS is true." "${errMsgSuffix}"
+      return 1
+    fi
+  fi
+
+  add_empty_line
+  configure_hostname "${hostname}"
+
+  add_empty_line
+  if is_ubuntu_18_04_or_later; then
+    create_netplan_config "${nic}" --renderer="${renderer}" --use_dhcp="${useDhcp}" --nic_ip="${nic_ip}" --ssid"=${ssid}" --wifi_password="${wifiPassword}"
+  fi
+
+  add_empty_line
+  install_NetworkManager
+
+  if [ -n "${gatewayIpAddress}" ] || { is_ubuntu_18_04_or_later && is_true "${useDhcp}" && [ "${renderer}" == "NetworkManager" ]; }; then
+    add_empty_line
+    # We should only execute this if we are using NetworkManager as netplan renderer useDhcp is true
+    # and a gateway ip has not been supplied in debian based system (i.e Ubuntu)
+    if [ -z "${gatewayIpAddress}" ] && { is_ubuntu_18_04_or_later && is_true "${useDhcp}" && [ "${renderer}" == "NetworkManager" ]; }; then
+      get_default_gateway_ip gatewayIpAddress
+      echo "Defaulting to using default gateway ip address ${gatewayIpAddress} supplied by DHCP server to configure default gatway"
+      echo
+    fi
+    configure_default_gateway "${gatewayIpAddress}" "${hostname}" "${nic}"
+  fi
+
+  add_empty_line
+  create_nameserver_config "${hostname}" "${nic}" "${useLocalDNS}" "${localNameserverIp}" "${localDNSDomainName}"
+
+  if is_ubuntu_18_04_or_later; then
+    #sudo ip route del default
+    sudo netplan apply
+  fi
+  echo "finished configuring networking for NIC ${nic} on host ${hostname} "
+   #   +e  DO NOT Exit immediately if a command exits with a non-zero status.
+    set +e
+}
+
 # Configure the default gateway
 # Args:
 #   $1 (gatewayIpAddress): the ip address of the default gateway e.g. 192.168.0.1
@@ -1434,7 +1864,7 @@ configure_default_gateway() {
 
   if [ -z "${nic}" ] && is_ubuntu_18_04_or_later; then
     print_stack_trace "The NIC (network interface card) is required for default gateway configuration of Ubuntu 18.04 or later. Please supply the NIC as arg 3"
-    return -1
+    return 1
   fi
 
   local flavour
@@ -1450,29 +1880,40 @@ GATEWAY=$gatewayIpAddress" > $networkFile
 
   elif is_ubuntu_18_04_or_later; then
     local netplanConfig=/etc/netplan/00-installer-config.yaml
-    local netplanPattern="routes:"
-    local netPlanGatewayInsertionPointPattern="^\s*${nic}:\s*$"
+    local netplanGatewayPlaceholder="# ${nic}_REPLACE_THIS_PLACEHOLDER_WITH_NETPLAN_GATEWAY_CONFIG"
+#    local netplanPattern="routes:"
+#    local netPlanGatewayInsertionPointPattern="^\s*${nic}:\s*$"
     local netplanDefaultGWStanza
     backup_file $netplanConfig
 
-    if ! grep -iP "${netplanPattern}" "${netplanConfig}"; then
+#    if ! grep -iP "${netplanPattern}" "${netplanConfig}"; then
+#      netplanDefaultGWStanza=$(eval 'cat << EOF
+#      routes:
+#        - to: 0.0.0.0/0
+#          via: ${gatewayIpAddress}
+#EOF
+#')
+#    insert_after "$netplanConfig" "${netPlanGatewayInsertionPointPattern}" "${netplanDefaultGWStanza}"
+#
+#    else
+#      # matches "   via: IP_ADDRESS"
+#      netplanPattern="^\s*via:\s*[0-9]{1,3}(\.[0-9]{1,3}){3,3}\s*$"
+#      netplanDefaultGWStanza=$(eval 'cat << EOF
+#          via: ${gatewayIpAddress}
+#EOF
+#')
+#fi
+    if  grep -iP "${netplanGatewayPlaceholder}" "${netplanConfig}"; then
       netplanDefaultGWStanza=$(eval 'cat << EOF
       routes:
         - to: 0.0.0.0/0
           via: ${gatewayIpAddress}
 EOF
 ')
-    insert_after "$netplanConfig" "${netPlanGatewayInsertionPointPattern}" "${netplanDefaultGWStanza}"
-
+      # Multipline replace
+      perl -pi -e "s|${netplanGatewayPlaceholder}|${netplanDefaultGWStanza}|g;" "${netplanConfig}"
     else
-      # matches "   via: IP_ADDRESS"
-      netplanPattern="^\s*via:\s*[0-9]{1,3}(\.[0-9]{1,3}){3,3}\s*$"
-      netplanDefaultGWStanza=$(eval 'cat << EOF
-          via: ${gatewayIpAddress}
-EOF
-')
-      sed -i -r "s|${netplanPattern}|${netplanDefaultGWStanza}|" "${netplanConfig}"
-
+      echo "Default gateway config placeholder \"${netplanGatewayPlaceholder}\" not found in ${netplanConfig}. skipping ..."
     fi
   elif [ "$flavour" == "debian" ]; then
     echo "Default Gateway not configuration not supported in Debian based systems. Skipping"
@@ -1541,32 +1982,40 @@ create_nameserver_config(){
 
 # For Ubuntu v18.04 and above, we use netplan to configure the nameservers
   if is_ubuntu_18_04_or_later ; then
-    resolv_conf=/etc/netplan/00-installer-config.yaml
-    echo "Creating ${osName} ${osVersion} nameservers config file $resolv_conf ..."
-    backup_file "$resolv_conf"
-    local nameserverIPStanza="addresses: [8.8.8.8, 8.8.1.1]"
-    localDnsSearchStanza="search: [$localDNSDomainName]"
+    local netplanConfig=/etc/netplan/00-installer-config.yaml
+    echo "Updating ${osName} ${osVersion} netplan config file $netplanConfig ..."
+    backup_file "$netplanConfig"
+    local localDnsSearchStanza
 
-    if is_true "$useLocalDNS"  ; then
-      nameserverIPStanza="addresses: [${localNameserverIp}, 8.8.8.8, 8.8.1.1]"
-      localDnsSearchStanza="search: [$localDNSDomainName]"
+    if [ -n "${localDNSDomainName}" ]; then
+      localDnsSearchStanza=$(eval 'cat << EOF
+        search: [$localDNSDomainName]
+EOF')
+    local nameserverIPStanza
+    nameserverIPStanza=$(eval 'cat << EOF
+      nameservers:
+        addresses: [8.8.8.8, 8.8.1.1]
+${localDnsSearchStanza}
+EOF')
     fi
 
-   #TODO
-   # Update to configure static ip addresses Ubuntu 18.04 and above
-   # See https://www.cloudsavvyit.com/4240/how-to-set-dns-search-order-in-ubuntu-18-04-using-netplan/
-   # and https://www.linuxjournal.com/content/have-plan-netplan
-    cat <<-EOF > $resolv_conf
-network:
-  version: 2
-  ethernets:
-    $nic:
-      dhcp4: true
+    if is_true "$useLocalDNS"  ; then
+      nameserverIPStanza=$(eval 'cat << EOF
       nameservers:
-        ${nameserverIPStanza}
-        ${localDnsSearchStanza}
-EOF
-    sudo netplan apply
+        addresses: [${localNameserverIp}, 8.8.8.8, 8.8.1.1]
+${localDnsSearchStanza}
+EOF')
+    fi
+
+    local netplanNameserverPlaceholder="# ${nic}_REPLACE_THIS_PLACEHOLDER_WITH_NETPLAN_NAMESERVER_CONFIG"
+    cat "${netplanConfig}"
+    if  grep -iP "${netplanNameserverPlaceholder}" "${netplanConfig}"; then
+      # Multipline replace
+      perl -pi -e "s|${netplanNameserverPlaceholder}|${nameserverIPStanza}|g;" "${netplanConfig}"
+    else
+      echo "Nameserver config placeholder \"${netplanNameserverPlaceholder}\" not found in ${netplanConfig}. skipping ..."
+    fi
+
   else
     resolv_conf=/etc/resolv.conf
     echo "Creating nameservers config file $resolv_conf ..."
@@ -1712,7 +2161,7 @@ configure_Wifi_For_NIC_using_NetworkManager(){
 #    insert_after /etc/NetworkManager/NetworkManager.conf "$comment" $dns_none_config_stanza
     echo "Creating NetworkManager dns override config at $network_dns_override_conf"
     echo -e "[main]
-#Added by George Badu new install post setup script
+#Added by Quantal Inc new install post setup script
 #Prevents NetworkManager from overwriting /etc/resolv.conf
 dns=none" > $network_dns_override_conf
 
@@ -1757,7 +2206,7 @@ install_zsh_and_oh_my_zsh() {
   local zshPkg=("zsh")
 
   local bashProfile
-  get_profile_file bashProfile
+  get_profile_file bashProfile --user=${userUnderConfig}
 
   if [ -z $userUnderConfig ] ; then
     print_stack_trace "The username of the user under configuration is required. Please provide the username for the user under configuration"
@@ -2061,12 +2510,11 @@ The provided run level $runLevel is unknown. Please select a number from the lis
   fi
 }
 
-# Returns the ip of the given network interface card (NIC) in the nicIp out variable. If not
+# Returns the ip of the given network interface card (NIC) in the nicIp out variable.
 # Args:
-#   $1 (nic): The name of the nic whose ip will be sent to the DNS server as part of the DNS A record
+#   $1 (nic): The name of the nic whose ip is wanted
 #   $2 (out nicIp): The ip of the NIC will be placed in this variable when supplied by the caller of this method
-#  NOTE: then name of $2 (out nicIp) MUST NOT BE PASSED in the expanded form i.e. it name of  $2 (out nicIp)
-#  MUST not be prefixed by the $ symbol
+#  NOTE: then name of $2 (out nicIp) MUST NOT BE PASSED in the expanded form i.e. it  MUST not be prefixed by the $ symbol
 #  Example Usage: get_ip $nip nicIp
 get_ip() {
   local nic=$1
@@ -2083,22 +2531,35 @@ get_ip() {
   return_function_result "$ipAddr"  "$___result___"
 }
 
+# Returns the ip of the default gateway in the the gatewayIp out variable.
+# Args:
+#   $ (out gatewayIp): The ip of the gateway will be placed in this variable when supplied by the caller of this method
+#  NOTE: then name of $1 (out gatewayIp) MUST NOT BE PASSED in the expanded form i.e. it  MUST not be prefixed by the $ symbol
+#  Example Usage: get_default_gateway_ip gatewayIp
+get_default_gateway_ip() {
+  local ___result___=$1
+  ipAddr=$(ip route show | grep default | awk '{print $3}'| awk '{split($0,a,"/"); print a[1]}')
+  return_function_result "$ipAddr"  "$___result___"
+}
+
 
 # Create and configures a script located at /opt/dns_updates_publisher/dns_updates_publisher.sh on a host to update the DNS record (i.e the hosts A record)
 # on a DNS server. This will add the host to the same zone (domain / network) as the dns .
 # This is the script is designed to be maintained by a systemd timer
 # Args:
 #   $1 (nameserverName): the name of the nameserver (i.e DNS nameserver)
-#   $2 (nic): The name of the nic whose ip will be sent to the DNS server as part of the DNS A record.
-#   $3 (domainName) - the domain name of the DNS server
-#   $4 (ddnsUpdateKey [Default: /etc/named/ddnsupdate.key]) - The path to the key that is used to update the dns.
+#   $2 (nameserverIp): the IP address of the nameserver (i.e DNS nameserver)
+#   $3 (nic): The name of the nic whose ip will be sent to the DNS server as part of the DNS A record.
+#   $4 (domainName) - the domain name of the DNS server
+#   $5 (ddnsUpdateKey [Default: /etc/named/ddnsupdate.key]) - The path to the key that is used to update the dns.
 #   The key should be obtained from the admin of the DNS server
 create_and_configure_dns_updates_publisher_script() {
   echo "Creating and configuring dns updater script"
   local nameserverName=$1
-  local nic=$2
-  local domainName=$3
-  local ddnsUpdateKey=$4
+  local nameserverIp=$2
+  local nic=$3
+  local domainName=$4
+  local ddnsUpdateKey=$5
   local dns_publisher_install_dir=/opt/dns_updates_publisher
   local dns_publisher_script=$dns_publisher_install_dir/dns_updates_publisher.sh
   local msg
@@ -2141,40 +2602,47 @@ create_and_configure_dns_updates_publisher_script() {
 
   local nicIp
   get_ip $nic nicIp
-  echo "NIC_IP -> $nicIp"
   cat <<-STOP > $dns_publisher_script
 #!/bin/bash
 echo "Sending DNS update"
 nsupdate -k $ddnsUpdateKey -v <<-EOF
-server $ns
+server $nameserverIp
 zone $zone
 update delete $domain A
 update add $domain 30 A $nicIp
 send
 EOF
+
+if [ "\$?" -eq 0 ]; then
+  echo "Successfully sent DNS update to DNS server ${ns}"
+else
+  echo "Failed to send DNS update to DNS server ${ns}"
+fi
 STOP
 
   chmod +x $dns_publisher_script
   echo "Finished creating and configuring dns updater script"
 }
 
-# Creates Systemd Service that issued to update the DNS Server with the name and Ip address
-# of the host that the service runs on. The systemd service unit will be located at /etc/systemd/system/dns_publisher.service
+# Creates Systemd Service that is used to update the DNS Server with the name and Ip address
+# of the host that the service runs on. The systemd service unit will be located at /etc/systemd/system/dns_updates_publisher.service
 #   $1 (nameserverHostname): the name of the nameserver (i.e DNS nameserver)
-#   $2 (nic): The name of the nic whose ip will be sent to the DNS server as part of the DNS A record.
-#   $3 (domainName) - the domain name of the DNS server
-#   $4 (ddnsUpdateKey [Default: /etc/named/ddnsupdate.key]) - The path to the key that is used to update the dns.
+#   $2 (nameserverIp): the IP address of the nameserver (i.e DNS nameserver)
+#   $3 (nic): The name of the nic whose ip will be sent to the DNS server as part of the DNS A record.
+#   $4 (domainName) - the domain name of the DNS server
+#   $5 (ddnsUpdateKey [Default: /etc/named/ddnsupdate.key]) - The path to the key that is used to update the dns.
 #   The key should be obtained from the admin of the DNS server
 create_dns_publisher_systemd_service() {
 
-  echo "Creating DNS publisher systemd service ..."
-  local dns_publisher_install_dir=/opt/dns_publisher
-  local dns_publisher_script=$dns_publisher_install_dir/dns_publisher.sh
-  local dns_publisher_service_path=/etc/systemd/system/dns_publisher.service
+  echo "Creating DNS updates publisher systemd service ..."
+  local dns_publisher_install_dir=/opt/dns_updates_publisher
+  local dns_publisher_script=$dns_publisher_install_dir/dns_updates_publisher.sh
+  local dns_publisher_service_path=/etc/systemd/system/dns_updates_publisher.service
   local nameserverHostname=$1
-  local nic=$2
-  local domainName=$3
-  local ddnsUpdateKey=$4
+  local nameserverIp=$2
+  local nic=$3
+  local domainName=$4
+  local ddnsUpdateKey=$5
 
   if [ -z "$nameserverHostname" ]; then
       print_stack_trace "The nameserver host name (e.g. mainframe) is required. Please supply the nameserner name as arg 1"
@@ -2191,7 +2659,7 @@ create_dns_publisher_systemd_service() {
       return 1
   fi
 
-  create_and_configure_dns_updates_publisher_script $nameserverHostname $nic $domainName $ddnsUpdateKey
+  create_and_configure_dns_updates_publisher_script $nameserverHostname $nameserverIp $nic $domainName $ddnsUpdateKey
 
   cat <<-EOF > $dns_publisher_service_path
 [Unit]
@@ -2204,27 +2672,29 @@ ExecStart=$dns_publisher_script
 [Install]
 WantedBy=multi-user.target
 EOF
-  echo "Finished creating DNS publisher systemd service"
+  echo "Finished creating DNS updates publisher systemd service"
 
 }
 
 # Creates Systemd Timer that is used to update the DNS Server with the name and Ip address
 # of the host that the timer runs on. The systemd timer unit will be located at /etc/systemd/system/dns_publisher.timer
 #   $1 (nameserverHostname): the name of the nameserver (i.e DNS nameserver)
-#   $2 (nic): The name of the nic whose ip will be sent to the DNS server as part of the DNS A record.
-#   $3 (domainName) - the domain name of the DNS server
-#   $4 (ddnsUpdateKey [Default: /etc/named/ddnsupdate.key]) - The path to the key that is used to update the dns.
+#   $2 (nameserverIp): The IP address of the nameserver
+#   $3 (nic): The name of the nic whose ip will be sent to the DNS server as part of the DNS A record.
+#   $4 (domainName) - the domain name of the DNS server
+#   $5 (ddnsUpdateKey [Default: /etc/named/ddnsupdate.key]) - The path to the key that is used to update the dns.
 #   The key should be obtained from the admin of the DNS server
 create_dns_publisher_systemd_timer() {
 
   echo "Creating DNS publisher systemd timer ..."
-  local timerName=dns_publisher.timer
-  local dns_publisher_service_path=/etc/systemd/system/dns_publisher.service
+  local timerName=dns_updates_publisher.timer
+  local dns_publisher_service_path=/etc/systemd/system/dns_updates_publisher.service
   local dns_publisher_timer_path=/etc/systemd/system/$timerName
   local nameserverHostname=$1
-  local nic=$2
-  local domainName=$3
-  local ddnsUpdateKey=$4
+  local nameserverIp=$2
+  local nic=$3
+  local domainName=$4
+  local ddnsUpdateKey=$5
 
   if [ -z "$nameserverHostname" ]; then
       print_stack_trace "The nameserver host name (e.g. mainframe) is required. Please supply the nameserner name as arg 1"
@@ -2241,7 +2711,7 @@ create_dns_publisher_systemd_timer() {
        return 1
     fi
 
-  create_dns_publisher_systemd_service "$nameserverHostname" "$nic" "$domainName" "$ddnsUpdateKey"
+  create_dns_publisher_systemd_service "$nameserverHostname" "$nameserverIp" "$nic" "$domainName" "$ddnsUpdateKey"
 
   cat <<-EOF > $dns_publisher_timer_path
 [Unit]
