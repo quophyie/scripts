@@ -4,7 +4,7 @@ set -e
 source ./shared_funcs.sh
 
 ## Configures /etc/resolv.conf
-#configure_resolv_conf(){
+#create_nameserver_config(){
 #  local resolv_conf=/etc/resolv.conf
 #  echo "Creating $resolv_conf ..."
 #  backup_file $resolv_conf
@@ -28,6 +28,8 @@ source ./shared_funcs.sh
 # HOSTNAME
 # NIC
 # CONFIRM_CONFIGURE_DDNS_UPDATES
+# VCONSOLE_CONF: Set to /etc/vconsole.conf for fedora based systems and
+#                /etc/default/console-setup for debian based systems
 # TRY_COPY_DDNS_UPDATE_KEY
 # NS_USER
 # NS_PASS
@@ -38,6 +40,31 @@ source ./shared_funcs.sh
 # DDNS_UPDATE_KEY
 configure_user_provided_input_and_initialise_vars() {
   # NIC_IP=$(dig +short myip.opendns.com @resolver1.opendns.com)
+
+  local flavour
+  get_os_flavour flavour
+
+  if [ "${flavour}" == "fedora" ]; then
+    VCONSOLE_CONF=/etc/vconsole.conf
+  elif [ "${flavour}" == "debian" ]; then
+    VCONSOLE_CONF=/etc/default/console-setup
+  fi
+
+  echo "Please provide the username of the user to be configured"
+
+  while [ -z $USER_UNDER_CONFIG ]
+      do
+          read USER_UNDER_CONFIG
+          if [ -z $USER_UNDER_CONFIG ]; then
+              echo "Username is required. Please enter the username"
+          elif [ "$USER_UNDER_CONFIG" == "root" ]; then
+              USER_UNDER_CONFIG_HOME=/$USER_UNDER_CONFIG
+          else
+              USER_UNDER_CONFIG_HOME=/home/$USER_UNDER_CONFIG
+          fi
+      done
+
+
   ip a
   add_empty_line
   echo "Please provide the name of the network interface card (NIC) from the list above"
@@ -133,8 +160,11 @@ main() {
   print_os_flavour
   configure_user_provided_input_and_initialise_vars
   add_empty_line
-  configure_hostname "$HOSTNAME"
-  configure_resolv_conf "$HOSTNAME" "$CONFIRM_CONFIGURE_DDNS_UPDATES" "$NS_IP" "$NS_DOMAIN_NAME"
+  install_git
+  add_empty_line
+  #install_powerline_fonts "$USER_UNDER_CONFIG_HOME" "$VCONSOLE_CONF"
+  install_zsh_and_oh_my_zsh "$USER_UNDER_CONFIG" "$USER_UNDER_CONFIG_HOME" "$VCONSOLE_CONF"
+  configure_networking "$NIC" "$HOSTNAME" --local_nameserver_ip="${NS_IP}" --local_dns_domain_name="${NS_DOMAIN_NAME}"
   if is_true "$CONFIRM_CONFIGURE_DDNS_UPDATES"; then
     configure_dynamic_dns_client "$NS_IP" "$NS_NAME" "$NS_DOMAIN_NAME" "$NIC" "$TRY_COPY_DDNS_UPDATE_KEY" "$NS_USER" "$NS_PASS" "$DDNS_UPDATE_KEY" "$DDNS_UPDATE_KEY_ON_NS_SERVER"
   fi
@@ -146,4 +176,5 @@ main
 # Fix NetworkManager overriding /etc/resolv.conf in clients
 
 # Unset
+#   set +e  DO NOT Exit/stop if a command exits with a non-zero status.
 set +e
