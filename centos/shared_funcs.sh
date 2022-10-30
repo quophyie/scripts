@@ -41,12 +41,12 @@ function require_root_access() {
   set -e
   local script_caller=$(whoami)
   if [ "$script_caller" != "root" ]; then
-      echo "********************************************************
+      print_stack_trace "********************************************************
 This script / command must be executed by user 'root'.
 Please use 'sudo' to execute this script / command or login as user
 root before executing this script / commands
 ********************************************************"
-    exit
+
   fi
 }
 
@@ -61,9 +61,10 @@ configure_x11_for_root () {
       sudo su -c "xauth add `cat /tmp/xauth` && xauth add `cat /tmp/xauth` && xauth merge /home/${script_caller}/.Xauthority && echo 'Finished X11 setup for root '&& exit"
 
     else
-      echo "********************************************************
+      local errMsg="********************************************************
 This function must be NOT executed by user 'root'
 ********************************************************"
+    print_stack_trace "${errMsg}"
     fi
 }
 # Returns the flavour of the OS e.g.  If the OS is Debian flavoured, will return 'debian' the OUT variable
@@ -413,7 +414,6 @@ is_wireless_nic (){
   if  [ -z "$__nic__" ]; then
     local stackSuffixMsg="Please supply nic as arg 1"
     print_stack_trace "Network interface name (nic) is required as arg 1" "$stackSuffixMsg"
-    return 1
   fi
 
   if [ -n "$__foundWirelessNic__" ] && [ "$__nic__" == "$__foundWirelessNic__" ]; then
@@ -694,17 +694,25 @@ delete_dir () {
 
 # Returns the profile file used in the shell
 #   Arg:
-#       $1: The profile file returned from this function. the caller of this function must provide a variable which
+#       $1 (out profile file): The profile file returned from this function. the caller of this function must provide a variable which
 #           be set by this function to the file name of the profile
+#        --user (optional): if supplied, will return the profile file for the given user
 #
 get_profile_file() {
 
     local  __resultvar=$1
     local profile
-    local userHome=${HOME}
+    local userHome
+    local user=$(whoami)
+
+    if [ "$user" = "root" ]; then
+      userHome="/${user}"
+    else
+      userHome="/home/${user}"
+    fi
+
      # shift one places
       shift
-
       while [ $# -gt 0 ]; do
         case "$1" in
           --user=*)
@@ -731,7 +739,6 @@ get_profile_file() {
     fi
 
     # this is the value that is returned to the caller of this function
-
     eval $__resultvar="'${profile}'"
 
 }
@@ -807,7 +814,7 @@ function get_fullpath_of_currently_executing_file() {
     local isSymLink=false
 
     # if this file has been symlinked the code in the while loop will resolve until
-    # we the actual directory containing this file is reached
+    # the actual directory containing this file is reached
     while [ -h "$source" ]; do # resolve $SOURCE until the file is no longer a symlink
       isSymLink=true
       DIR="$( cd -P "$( dirname "$source" )" >/dev/null 2>&1 && pwd )"
@@ -849,57 +856,154 @@ function get_or_create_shared_scripts_env_var_value() {
   return_function_result "${__sharedCommonScriptsDir__}" "$__sharedScriptsDirOut__"
 
 }
-#configures the SHARED_SCRIPTS_DIR environment variable and exports it for both root and the user running this script
+
+# Install the shared functions file i.e. This script into ${SHARED_SCRIPTS_DIR}/libs
 # Args:
-#   $1 (includeRoot [Default=true]): If true, will be configured for root user
-configure_shared_scripts_dir_env_var(){
+#   $1 shared_funcs_lib: (OUT): When, provided the path to the  installed shared libs file will be placed in this variable
+# shellcheck disable=SC2120
+install_shared_func(){
 
-  local includeRoot=${1:-true}
+  local __shared_funcs_lib__=$1
   local sharedScriptsDir
-  local script_caller=$(whoami)
-  # Get the shell executing the script
-  local profileFile
-  get_profile_file profileFile
+  local thisFile
+  local sharedFuncLibDir
   get_or_create_shared_scripts_env_var_value sharedScriptsDir
+  get_fullpath_of_currently_executing_file thisFile
+  sharedFuncLibDir="${sharedScriptsDir}/lib"
+  local scriptFilename=$(basename "${thisFile}")
+  local sharedScriptsFile="${sharedFuncLibDir}/${scriptFilename}"
 
-  if [ -f "${profileFile}" ]; then
-    echo "configuring SHARED_SCRIPTS_DIR for ${script_caller} ..."
-    backup_file "${profileFile}"
-    # Delete the line containing the SHARED_SCRIPTS_DIR export
-    sed -i '/^.*SHARED_SCRIPTS_DIR=.*$/d' "${profileFile}"
-    echo "export SHARED_SCRIPTS_DIR=${sharedScriptsDir}" >> "${profileFile}"
-    source "${profileFile}"
-    echo "finished configuring SHARED_SCRIPTS_DIR for ${script_caller} ..."
+  echo "Installing shared functions script ${sharedScriptsFile} ..."
+  if [ ! -d "${sharedFuncLibDir}" ]; then
+    mkdir -p "${sharedFuncLibDir}"
   fi
 
-  if is_true "${includeRoot}"; then
-    echo "configuring SHARED_SCRIPTS_DIR for root ..."
-    local thisFile
-    get_fullpath_of_currently_executing_file thisFile
-
-    sudo su -c "source ${thisFile}
-    rootProfile=
-    get_profile_file rootProfile
-    backup_file \${rootProfile}
-    # Delete the line containing the SHARED_SCRIPTS_DIR export
-    sed -i '/^.*SHARED_SCRIPTS_DIR=.*$/d' \${rootProfile}
-    echo \"export SHARED_SCRIPTS_DIR=${sharedScriptsDir} \" >> \${rootProfile}
-    source \${rootProfile}
-    echo \"finished configuring SHARED_SCRIPTS_DIR for root ...\"
-    "
+  if [ -f "${sharedScriptsFile}" ]; then
+    rm -rv "${sharedScriptsFile}"
   fi
+
+  cp -v "${thisFile}" "${sharedScriptsFile}"
+  chmod 777 "${sharedScriptsFile}"
+
+  echo "Finished installing shared functions script ${sharedScriptsFile}"
+  return_function_result "${sharedScriptsFile}" "${__shared_funcs_lib__}"
+
 }
 
-
-# Configures the shell profiles for a user by setting up environment variables, functions,
-# aliases etc
+# configures shell aliases
 # Args:
-#     $1 (user): user to configure the shell for
-configure_user_shell(){
+#   $1 (user): the user whose shell aliases is to be configured
+configure_shell_aliases(){
+  local user=${1}
+  local flavour
+  local aliasesFile
+  local configureX11ForRootAliasStanza=$(eval 'cat << EOF
+alias configure_x11_for_root="configure_x11_for_root"
+EOF')
+
+  echo "Adding aliases ..."
+  if [ -z "${__user__}" ]; then
+    local errMsgSuffix="Please supply user as arg 1 to configure_shell_aliases function"
+    print_stack_trace "user is required for calls to configure_shell_aliases function" "${errMsgSuffix}"
+  fi
+  if [ "$user" = "root" ]; then
+    userHome="/root"
+  else
+    userHome="/home/${__user__}"
+  fi
+
+  get_os_flavour flavour
+  if [ "${flavour}" == "fedora" ]; then
+    local bashrcDir="${userHome}/.bashrc.d"
+    aliasesFile="${bashrcDir}/bash_aliases"
+    if [ ! -d "${bashrcDir}" ]; then
+      mkdir -p "${bashrcDir}"
+      cat <<EOF >  "${aliasesFile}"
+# Convenient aliases
+${configureX11ForRootAliasStanza}
+EOF
+      chmod -Rv 755 "${aliasesFile}"
+      chown -R ${user} ${bashrcDir}
+    fi
+  elif [ "${flavour}" == "debian" ]; then
+    aliasesFile="${userHome}/.bash_aliases"
+    if [ ! -f "${aliasesFile}" ]; then
+    cat <<EOF >  "${aliasesFile}"
+# Convenient aliases
+${configureX11ForRootAliasStanza}
+EOF
+    else
+      backup_file "${aliasesFile}"
+      sed -i "/^.*${configureX11ForRootAliasStanza}.*$/d" "${aliasesFile}"
+      echo "${configureX11ForRootAliasStanza}" >> "${aliasesFile}"
+    fi
+  fi
+  echo "Finished adding aliases"
+}
+
+# Updates ~/.bashrc with environment variables such as SHARED_SCRIPTS_DIR and source statements for
+# shared libs such as shared_funcs.sh
+# Args:
+#   $1 (user): the user whose ~/.bashrc is to be configured
+#   $2 (installedSharedScriptsLibFile): The full path to the shared functions library
+#         i.e the full path to shared_func.sh
+update_bashrc_with_env_vars_and_source_statements(){
+
+#  local includeRoot=${1:-true}
+#  local sharedScriptsDir
+#  local user
+#
+#     # shift one places
+#  shift
+#  while [ $# -gt 0 ]; do
+#    case "$1" in
+#      --user=*)
+#        user="${1#*=}"
+#        ;;
+#      *)
+#    esac
+#    shift
+#  done
+#
+#  if [ -z "${user}" ]; then
+#    user=$(whoami)
+#  fi
+#  # Get the shell executing the script
+#  local profileFile
+#  get_profile_file profileFile --user=${user}
+#  get_or_create_shared_scripts_env_var_value sharedScriptsDir
+#
+#  if [ -f "${profileFile}" ]; then
+#    echo "configuring SHARED_SCRIPTS_DIR for ${user} ..."
+#    backup_file "${profileFile}"
+#    # Delete the line containing the SHARED_SCRIPTS_DIR export
+#    sed -i '/^.*SHARED_SCRIPTS_DIR=.*$/d' "${profileFile}"
+#    echo "export SHARED_SCRIPTS_DIR=${sharedScriptsDir}" >> "${profileFile}"
+#    source "${profileFile}"
+#    echo "finished configuring SHARED_SCRIPTS_DIR for ${user} ..."
+#  fi
+#
+#  if is_true "${includeRoot}"; then
+#    echo "configuring SHARED_SCRIPTS_DIR for root ..."
+#    local thisFile
+#    get_fullpath_of_currently_executing_file thisFile
+#
+#    sudo su -c "source ${thisFile}
+#    rootProfile=
+#    get_profile_file rootProfile --user=root
+#    backup_file \${rootProfile}
+#    # Delete the line containing the SHARED_SCRIPTS_DIR export
+#    sed -i '/^.*SHARED_SCRIPTS_DIR=.*$/d' \${rootProfile}
+#    echo \"export SHARED_SCRIPTS_DIR=${sharedScriptsDir} \" >> \${rootProfile}
+#    source \${rootProfile}
+#    echo \"finished configuring SHARED_SCRIPTS_DIR for root ...\"
+#    "
+#  fi
+
   local __user__=$1
+  local installedSharedScriptsLibFile=$2
   local flavour
   local bashrc
-  local profile
   get_os_flavour flavour
   local userHome
   local sharedScriptsDir="${SHARED_SCRIPTS_DIR}"
@@ -908,7 +1012,17 @@ configure_user_shell(){
   local sharedScriptsDirInsertionPoint
   local sharedScriptsDirInsertionText
 
-  if [ "$user" = "root" ]; then
+  if [ -z "${__user__}" ]; then
+    local errMsgSuffix="Please supply user as arg 1 to update_bashrc_with_env_vars_and_source_statements"
+    print_stack_trace "user is required for calls to update_bashrc_with_env_vars_and_source_statements function" "${errMsgSuffix}"
+  fi
+
+  if [ -z "${installedSharedScriptsLibFile}" ]; then
+    local errMsgSuffix="Please full path to shared_funcs.sh user as arg 2 to update_bashrc_with_env_vars_and_source_statements"
+    print_stack_trace "installedSharedScriptsLibFile is required for calls to update_bashrc_with_env_vars_and_source_statements function" "${errMsgSuffix}"
+  fi
+
+  if [ "${__user__}" = "root" ]; then
     userHome="/root"
   else
     userHome="/home/${__user__}"
@@ -916,55 +1030,300 @@ configure_user_shell(){
 
   bashrc="${userHome}/.bashrc"
 
-  if [ "$flavour" == "fedora" ]; then
-    profile="${userHome}/.bash_profile"
+  echo "Updating user ${__user__}  bashrc file ${bashrc} with environment variables and source statements ..."
 
-  elif [ "$flavour" == "debian" ]; then
-    profile="${userHome}/.profile"
-  else
-    echo "Cannot configure shell for Unknown OS flavour"
-    return 1
-  fi
-
+  local sourceInstalledSharedScriptsLibStanza="source ${installedSharedScriptsLibFile}"
   # Update ~/.bashrc with SHARED_SCRIPTS_DIR env var
+  # Update ~/.bashrc source shared_funcs.sh
   if [ -z "${sharedScriptsDir}" ]; then
     get_or_create_shared_scripts_env_var_value sharedScriptsDir
     # escape backslashes
     sharedScriptsDirRegPattern=$(echo "${sharedScriptsDir}" | sed "s|/|\/|g")
-    sharedScriptsDirRegPattern="export SHARED_SCRIPTS_DIR=${sharedScriptsDirRegPattern}"
+    sharedScriptsDirRegPattern="^\s*export SHARED_SCRIPTS_DIR=${sharedScriptsDirRegPattern}\s*$"
 
     backup_file "${bashrc}"
     if ! grep -iP "${sharedScriptsDirRegPattern}" "${bashrc}" ; then
+
+      # Delete all lines that export SHARED_SCRIPTS_DIR statement line
+      sharedScriptsDirRegPattern=$(echo "${sharedScriptsDir}" | sed "s|/|\/|g")
+      sharedScriptsDirRegPattern="^\s*export SHARED_SCRIPTS_DIR=${sharedScriptsDirRegPattern}.*\s*$"
+      sharedScriptsDirRegPattern=$(echo "${sharedScriptsDirRegPattern}" | sed "s|[.]|\.|g")
+      sed -i "\|${sharedScriptsDirRegPattern}|d" "${bashrc}"
+
+      # Delete all lines that source the shared func lib
+      sharedScriptsDirRegPattern=$(echo "^\s*${sourceInstalledSharedScriptsLibStanza}" | sed "s|/|\/|g")
+      sharedScriptsDirRegPattern=$(echo "${sharedScriptsDirRegPattern}" | sed "s|[.]|\.|g")
+      sharedScriptsDirRegPattern="${sharedScriptsDirRegPattern}.*\s*$"
+      sed -i "\|${sharedScriptsDirRegPattern}|d" "${bashrc}"
+
       if [ "fedora" == "${flavour}" ]; then
         echo "Configuring SHARED_SCRIPTS_DIR env var in  Fedora Flavoured OS ${bashrc}"
         sharedScriptsDirInsertionPoint="# .bashrc"
-        sharedScriptsDirInsertionText="# .bashrc\nexport SHARED_SCRIPTS_DIR=${sharedScriptsDir}"
-        sharedScriptsDirInsertionPointRegPattern=$(echo "${sharedScriptsDirInsertionPoint}" | sed "s|[.]|\.|g")
-        sed -i "s|${sharedScriptsDirInsertionPointRegPattern}|${sharedScriptsDirInsertionText}|g" "${bashrc}"
+        sharedScriptsDirInsertionText=$(eval 'cat << EOF
+# .bashrc
+
+export SHARED_SCRIPTS_DIR=${sharedScriptsDir}
+${sourceInstalledSharedScriptsLibStanza}
+EOF')
+        sharedScriptsDirInsertionPointRegPattern=$(echo "${sharedScriptsDirInsertionPoint}" | perl -p -e  "s|[.]|\.|g")
+        # Multipline replace
+        perl -pi -e "s|${sharedScriptsDirInsertionPointRegPattern}|${sharedScriptsDirInsertionText}|" "${bashrc}"
       else
         echo "Configuring SHARED_SCRIPTS_DIR env var in  Debian Flavoured OS ${bashrc}"
         sharedScriptsDirInsertionPoint="# for examples"
-        sharedScriptsDirInsertionText="${sharedScriptsDirInsertionPoint}\n\nexport SHARED_SCRIPTS_DIR=${sharedScriptsDir}"
-        sharedScriptsDirInsertionPointRegPattern=$(echo "${sharedScriptsDirInsertionPoint}" | sed "s|[.]|\.|g")
-        sed -i "s|${sharedScriptsDirInsertionPointRegPattern}|${sharedScriptsDirInsertionText}|g" "${bashrc}"
+        sharedScriptsDirInsertionText=$(eval 'cat << EOF
+# for examples
 
+export SHARED_SCRIPTS_DIR=${sharedScriptsDir}
+${sourceInstalledSharedScriptsLibStanza}
+
+EOF')
+        sharedScriptsDirInsertionPointRegPattern=$(echo "${sharedScriptsDirInsertionPoint}" | perl -p -e "s|[.]|\.|g")
+        # sharedScriptsDirInsertionPointRegPattern=$(echo "${sharedScriptsDirInsertionPoint}" | sed "s|[.]|\.|g")
+        # Multipline replace
+         #perl -pi -e "!\$subbed{\$ARGV} and s|${sharedScriptsDirInsertionPointRegPattern}|${sharedScriptsDirInsertionText}| and \$subbed{\$ARGV}++" "${bashrc}"
+         perl -pi -e "s|${sharedScriptsDirInsertionPointRegPattern}|${sharedScriptsDirInsertionText}|" "${bashrc}"
       fi
     else
-      echo "NO matching entry for Regex pattern ${sharedScriptsDirRegPattern} found in ${bashrc}"
+      echo "bashrc (i.e ${bashrc}) already contains SHARED_SCRIPTS_DIR environment variable export statement ie."
+      echo "\"${sharedScriptsDirRegPattern}\""
+      echo "Nothing to do!! .. Skipping"""
     fi
   else
     echo "Found SHARED_SCRIPTS_DIR env var in ${bashrc}"
-
+    # escape all the forward slashes
     sharedScriptsDirRegPattern=$(echo "${sharedScriptsDir}" | sed "s|/|\/|g")
     sharedScriptsDirRegPattern="export SHARED_SCRIPTS_DIR=${sharedScriptsDirRegPattern}"
-    sharedScriptsDirInsertionPointRegPattern="^export SHARED_SCRIPTS_DIR=.*$"
+
+    sharedScriptsDirInsertionPointRegPattern="REPLACE_THIS_PLACEHOLDER_WITH_SHARED_SCRIPTS_DIR"
+    # Replace the first instance of the shared directory export statement with the sharedScriptsDirInsertionPointRegPattern
+    # The sed address will replace the 1st occurrence sharedScriptsDirInsertionPointRegPattern
+    # Note how we change the delimimter from forward slash to | (i.e pipe) with the \| command
+    # We change the delimimter because sharedScriptsDirRegPattern contains forward slashes
+    sed -i "0,\|^${sharedScriptsDirRegPattern}$|s|^$sharedScriptsDirRegPattern$|${sharedScriptsDirInsertionPointRegPattern}|" "${bashrc}"
+
+    # Delete the rest of the shared directory export statements
+    # Note how we change the delimimter from forward slash to | (i.e pipe) with the \| command
+    # We change the delimimter because sharedScriptsDirRegPattern contains forward slashes
+    sed -i "\|^${sharedScriptsDirRegPattern}$|d" "${bashrc}"
+    #sharedScriptsDirInsertionPointRegPattern="^export SHARED_SCRIPTS_DIR=.*$"
     sharedScriptsDirInsertionText="export SHARED_SCRIPTS_DIR=${sharedScriptsDir}"
-    if grep -iP "${sharedScriptsDirRegPattern}" "${bashrc}" ; then
+    if grep -iP "${sharedScriptsDirInsertionPointRegPattern}" "${bashrc}" ; then
       echo "Updating SHARED_SCRIPTS_DIR env var in ${bashrc}"
       sed -i "s|${sharedScriptsDirInsertionPointRegPattern}|${sharedScriptsDirInsertionText}|g" "${bashrc}"
     fi
   fi
 
+   echo "Finished updating user ${__user__}  bashrc file ${bashrc} with environment variables and source statements ..."
+}
+
+# Configures the shell profiles for a given user by calling do_configure_user_shell.
+# This allows us to call do_configure_user_shell with a user other than roor even if sudo is used to call this function
+# It also allows us to set certain environment variables such as
+# HOME to the correct values when this function is called with sudo and not the root values used by root
+# aliases etc
+# Args:
+#     $1 (user): user to configure the shell for configure
+configure_user_shell() {
+  local __user__=$1
+  if [ -z "${__user__}" ]; then
+    local errMsgSuffix="Please supply user as arg 1 to configure_user_shell"
+    print_stack_trace "user is required for calls to configure_user_shell function" "${errMsgSuffix}"
+  fi
+  local thisFile
+  get_fullpath_of_currently_executing_file thisFile
+  local sharedScriptsDir
+  get_or_create_shared_scripts_env_var_value sharedScriptsDir
+
+  if [ ! -d "${sharedScriptsDir}" ]; then
+    mkdir -p "${sharedScriptsDir}"
+  fi
+
+  local sharedFuncLibFile="${sharedScriptsDir}/lib/shared_funcs.sh"
+  chmod u=rwx,g=rwx,o=rwx "${sharedScriptsDir}"
+  su -p -c "
+  user=\$(whoami)
+   if [ \"\$user\" = \"root\" ]; then
+      userHome=\"/root\"
+    else
+      userHome=\"/home/\${user}\"
+    fi
+  bashrc=~/.bashrc
+  # sharedFuncLibFileRegPattern=\$(echo \"${sharedFuncLibFile}\" | sed \"s|/|\/|g\")
+  # sharedFuncLibFileRegPattern=\$(echo \"\${sharedFuncLibFileRegPattern}\" | sed \"s|[.]|\.|g\")
+  # sed -i \"\|^\${sharedFuncLibFileRegPattern}$|d\" \${bashrc}
+  source ${thisFile};
+  profileFile=
+  userHome=
+  get_profile_file profileFile
+  HOME=\${userHome} source \${profileFile};
+  do_configure_user_shell ${__user__}" "${__user__}"
+}
+
+# Configures the shell profiles for a user by setting up environment variables, functions,
+# aliases etc
+# Args:
+#     $1 (user): user to configure the shell for configure
+do_configure_user_shell(){
+  local __user__=$1
+  local profile
+  local flavour
+#  local bashrc
+#  get_os_flavour flavour
+#  local userHome
+#  local installedSharedScriptsLibFile
+#  local sharedScriptsDir="${SHARED_SCRIPTS_DIR}"
+#  local sharedScriptsDirRegPattern
+#  local sharedScriptsDirInsertionPointRegPattern
+#  local sharedScriptsDirInsertionPoint
+#  local sharedScriptsDirInsertionText
+#
+#  if [ -z "${__user__}" ]; then
+#    local errMsgSuffix="Please supply user as arg 1 to do_configure_user_shell"
+#    print_stack_trace "user is required for calls to do_configure_user_shell function" "${errMsgSuffix}"
+#  fi
+#  shift
+#  while [ $# -gt 0 ]; do
+#    case "$1" in
+#      --configure_root_shell=*)
+#        user="${1#*=}"
+#        ;;
+#      *)
+#    esac
+#    shift
+#  done
+#  echo "Configuring shell for user ${__user__} ..."
+#
+#  if [ "${__user__}" = "root" ]; then
+#    userHome="/root"
+#  else
+#    userHome="/home/${__user__}"
+#  fi
+#
+#  bashrc="${userHome}/.bashrc"
+#
+#  if [ "$flavour" == "fedora" ]; then
+#    profile="${userHome}/.bash_profile"
+#  elif [ "$flavour" == "debian" ]; then
+#    profile="${userHome}/.profile"
+#  else
+#    print_stack_trace "Cannot configure shell for Unknown OS flavour"
+#  fi
+#
+#  configure_shell_aliases "${__user__}"
+#  local thisFile
+#  get_fullpath_of_currently_executing_file thisFile
+#  install_shared_func installedSharedScriptsLibFile
+#  local sourceInstalledSharedScriptsLibStanza="source ${installedSharedScriptsLibFile}"
+#  # Update ~/.bashrc with SHARED_SCRIPTS_DIR env var
+#  if [ -z "${sharedScriptsDir}" ]; then
+#    get_or_create_shared_scripts_env_var_value sharedScriptsDir
+#    # escape backslashes
+#    sharedScriptsDirRegPattern=$(echo "${sharedScriptsDir}" | sed "s|/|\/|g")
+#    sharedScriptsDirRegPattern="^\s*export SHARED_SCRIPTS_DIR=${sharedScriptsDirRegPattern}\s*$"
+#
+#    backup_file "${bashrc}"
+#    if ! grep -iP "${sharedScriptsDirRegPattern}" "${bashrc}" ; then
+#
+#      # Delete all lines that export SHARED_SCRIPTS_DIR statement line
+#      sharedScriptsDirRegPattern=$(echo "${sharedScriptsDir}" | sed "s|/|\/|g")
+#      sharedScriptsDirRegPattern="^\s*export SHARED_SCRIPTS_DIR=${sharedScriptsDirRegPattern}.*\s*$"
+#      sharedScriptsDirRegPattern=$(echo "${sharedScriptsDirRegPattern}" | sed "s|[.]|\.|g")
+#      sed -i "\|${sharedScriptsDirRegPattern}|d" "${bashrc}"
+#
+#      # Delete all lines that source the shared func lib
+#      sharedScriptsDirRegPattern=$(echo "^\s*${sourceInstalledSharedScriptsLibStanza}" | sed "s|/|\/|g")
+#      sharedScriptsDirRegPattern=$(echo "${sharedScriptsDirRegPattern}" | sed "s|[.]|\.|g")
+#      sharedScriptsDirRegPattern="${sharedScriptsDirRegPattern}.*\s*$"
+#      sed -i "\|${sharedScriptsDirRegPattern}|d" "${bashrc}"
+#
+#      if [ "fedora" == "${flavour}" ]; then
+#        echo "Configuring SHARED_SCRIPTS_DIR env var in  Fedora Flavoured OS ${bashrc}"
+#        sharedScriptsDirInsertionPoint="# .bashrc"
+#        # sharedScriptsDirInsertionText="# .bashrc\nexport SHARED_SCRIPTS_DIR=${sharedScriptsDir}"
+#        # sharedScriptsDirInsertionPointRegPattern=$(echo "${sharedScriptsDirInsertionPoint}" | sed "s|[.]|\.|g")
+#        # sed -i "s|${sharedScriptsDirInsertionPointRegPattern}|${sharedScriptsDirInsertionText}|g" "${bashrc}"
+#        sharedScriptsDirInsertionText=$(eval 'cat << EOF
+## .bashrc
+#
+#export SHARED_SCRIPTS_DIR=${sharedScriptsDir}
+#${sourceInstalledSharedScriptsLibStanza}
+#EOF')
+#        # sharedScriptsDirInsertionPointRegPattern=$(echo "${sharedScriptsDirInsertionPoint}" | sed "s|[.]|\.|g")
+#        sharedScriptsDirInsertionPointRegPattern=$(echo "${sharedScriptsDirInsertionPoint}" | perl -p -e  "s|[.]|\.|g")
+#        # Multipline replace
+#        perl -pi -e "s|${sharedScriptsDirInsertionPointRegPattern}|${sharedScriptsDirInsertionText}|" "${bashrc}"
+#      else
+#        echo "Configuring SHARED_SCRIPTS_DIR env var in  Debian Flavoured OS ${bashrc}"
+#        sharedScriptsDirInsertionPoint="# for examples"
+#        #sharedScriptsDirInsertionText="${sharedScriptsDirInsertionPoint}\n\nexport SHARED_SCRIPTS_DIR=${sharedScriptsDir}"
+#        #sharedScriptsDirInsertionPointRegPattern=$(echo "${sharedScriptsDirInsertionPoint}" | sed "s|[.]|\.|g")
+#        # sed -i "s|${sharedScriptsDirInsertionPointRegPattern}|${sharedScriptsDirInsertionText}|g" "${bashrc}"
+#        sharedScriptsDirInsertionText=$(eval 'cat << EOF
+## for examples
+#
+#export SHARED_SCRIPTS_DIR=${sharedScriptsDir}
+#${sourceInstalledSharedScriptsLibStanza}
+#
+#EOF')
+#        sharedScriptsDirInsertionPointRegPattern=$(echo "${sharedScriptsDirInsertionPoint}" | perl -p -e "s|[.]|\.|g")
+#        # sharedScriptsDirInsertionPointRegPattern=$(echo "${sharedScriptsDirInsertionPoint}" | sed "s|[.]|\.|g")
+#        # Multipline replace
+#         #perl -pi -e "!\$subbed{\$ARGV} and s|${sharedScriptsDirInsertionPointRegPattern}|${sharedScriptsDirInsertionText}| and \$subbed{\$ARGV}++" "${bashrc}"
+#         perl -pi -e "s|${sharedScriptsDirInsertionPointRegPattern}|${sharedScriptsDirInsertionText}|" "${bashrc}"
+#      fi
+#    else
+#      echo "bashrc (i.e ${bashrc}) already contains SHARED_SCRIPTS_DIR environment variable export statement ie."
+#      echo "\"${sharedScriptsDirRegPattern}\""
+#      echo "Nothing to do!! .. Skipping"""
+#    fi
+#  else
+#    echo "Found SHARED_SCRIPTS_DIR env var in ${bashrc}"
+#    # escape all the forward slashes
+#    sharedScriptsDirRegPattern=$(echo "${sharedScriptsDir}" | sed "s|/|\/|g")
+#    sharedScriptsDirRegPattern="export SHARED_SCRIPTS_DIR=${sharedScriptsDirRegPattern}"
+#
+#    sharedScriptsDirInsertionPointRegPattern="REPLACE_THIS_PLACEHOLDER_WITH_SHARED_SCRIPTS_DIR"
+#    # Replace the first instance of the shared directory export statement with the sharedScriptsDirInsertionPointRegPattern
+#    # The sed address will replace the 1st occurrence sharedScriptsDirInsertionPointRegPattern
+#    # Note how we change the delimimter from forward slash to | (i.e pipe) with the \| command
+#    # We change the delimimter because sharedScriptsDirRegPattern contains forward slashes
+#    sed -i "0,\|^${sharedScriptsDirRegPattern}$|s|^$sharedScriptsDirRegPattern$|${sharedScriptsDirInsertionPointRegPattern}|" "${bashrc}"
+#
+#    # Delete the rest of the shared directory export statements
+#    # Note how we change the delimimter from forward slash to | (i.e pipe) with the \| command
+#    # We change the delimimter because sharedScriptsDirRegPattern contains forward slashes
+#    sed -i "\|^${sharedScriptsDirRegPattern}$|d" "${bashrc}"
+#    #sharedScriptsDirInsertionPointRegPattern="^export SHARED_SCRIPTS_DIR=.*$"
+#    sharedScriptsDirInsertionText="export SHARED_SCRIPTS_DIR=${sharedScriptsDir}"
+#    if grep -iP "${sharedScriptsDirInsertionPointRegPattern}" "${bashrc}" ; then
+#      echo "Updating SHARED_SCRIPTS_DIR env var in ${bashrc}"
+#      sed -i "s|${sharedScriptsDirInsertionPointRegPattern}|${sharedScriptsDirInsertionText}|g" "${bashrc}"
+#    fi
+#  fi
+#
+#  echo "Finished configuring shell for user ${__user__} ..."
+
+  echo "Configuring shell for user ${__user__} ..."
+  get_os_flavour flavour
+  if [ "${__user__}" = "root" ]; then
+    userHome="/root"
+  else
+    userHome="/home/${__user__}"
+  fi
+  if [ "$flavour" == "fedora" ]; then
+    profile="${userHome}/.bash_profile"
+  elif [ "$flavour" == "debian" ]; then
+    profile="${userHome}/.profile"
+  else
+    print_stack_trace "Cannot configure shell for Unknown OS flavour"
+  fi
+  configure_shell_aliases "${__user__}"
+  install_shared_func installedSharedScriptsLibFile
+  update_bashrc_with_env_vars_and_source_statements "${__user__}" "${installedSharedScriptsLibFile}"
+  echo "sourcing ${profile} ..."
+  source "${profile}"
+  echo "Finished configuring shell for user ${__user__} ..."
 }
 
 # Installs wget
@@ -981,8 +1340,6 @@ install_wget (){
     sudo apt-get update
     sudo apt-get -y install wget
   fi
-
-
 }
 
 # Install GIT
@@ -1537,7 +1894,6 @@ create_netplan_config(){
       fi
 
     shift
-
     while [ $# -gt 0 ]; do
       case "$1" in
         --renderer=*)
@@ -1635,8 +1991,8 @@ EOF
     ${nic}:
 ${netplanNICIpConfigStanza}
       access-points:
-        ""${ssid}"":
-            password: ""${wifiPassword}""
+        "${ssid}":
+          password: "${wifiPassword}"
 ${netplanGatewayPlaceholder}
 ${netplanNameserverPlaceholder}
 EOF
@@ -2206,7 +2562,19 @@ install_zsh_and_oh_my_zsh() {
   local zshPkg=("zsh")
 
   local bashProfile
-  get_profile_file bashProfile --user=${userUnderConfig}
+  get_profile_file bashProfile --user="${userUnderConfig}"
+  local sourceBashrcStanza
+  local flavour
+  get_os_flavour flavour
+
+  if [ "${flavour}" == "debian" ]; then
+    sourceBashrcStanza=$(eval 'cat << EOF
+# Source ~/.bashrc
+source ~/.bashrc
+
+EOF'
+);
+  fi
 
   if [ -z $userUnderConfig ] ; then
     print_stack_trace "The username of the user under configuration is required. Please provide the username for the user under configuration"
@@ -2420,6 +2788,7 @@ source \$ZSH/oh-my-zsh.sh
 # alias zshconfig="mate ~/.zshrc"
 # alias ohmyzsh="mate ~/.oh-my-zsh"
 
+${sourceBashrcStanza}
 # Source profile e.g. ~/.bash_profile
 
 source "${bashProfile}"
