@@ -897,8 +897,12 @@ configure_shell_aliases(){
   local user=${1}
   local flavour
   local aliasesFile
+  local updateAliasFile="false"
   local configureX11ForRootAliasStanza=$(eval 'cat << EOF
 alias configure_x11_for_root="configure_x11_for_root"
+EOF')
+  local configureUserShellAliasStanza=$(eval 'cat << EOF
+alias configure_user_shell="source \${SHARED_SCRIPTS_DIR}/lib/shared_funcs.sh; configure_user_shell $1 \${SHARED_SCRIPTS_DIR}/lib/shared_funcs.sh"
 EOF')
 
   echo "Adding aliases ..."
@@ -921,9 +925,12 @@ EOF')
       cat <<EOF >  "${aliasesFile}"
 # Convenient aliases
 ${configureX11ForRootAliasStanza}
+${configureUserShellAliasStanza}
 EOF
       chmod -Rv 755 "${aliasesFile}"
       chown -R ${user} ${bashrcDir}
+    else
+      updateAliasFile="true"
     fi
   elif [ "${flavour}" == "debian" ]; then
     aliasesFile="${userHome}/.bash_aliases"
@@ -931,12 +938,24 @@ EOF
     cat <<EOF >  "${aliasesFile}"
 # Convenient aliases
 ${configureX11ForRootAliasStanza}
+${configureUserShellAliasStanza}
 EOF
     else
-      backup_file "${aliasesFile}"
-      sed -i "/^.*${configureX11ForRootAliasStanza}.*$/d" "${aliasesFile}"
-      echo "${configureX11ForRootAliasStanza}" >> "${aliasesFile}"
+      updateAliasFile="true"
     fi
+  fi
+  if is_true "${updateAliasFile}"; then
+    echo "Updating aliases file ${aliasesFile} ..."
+    backup_file "${aliasesFile}"
+    local configureX11ForRootAliasPattern=$(echo "${configureX11ForRootAliasStanza}" | sed "s|/|\/|g")
+    configureX11ForRootAliasPattern=$(echo "${configureX11ForRootAliasPattern}" | sed "s|[.]|\.|g")
+    sed -i "\|^.*${configureX11ForRootAliasPattern}.*$|d" "${aliasesFile}"
+    echo "${configureX11ForRootAliasStanza}" >> "${aliasesFile}"
+
+    local configureUserShellAliasPattern=$(echo "${configureUserShellAliasStanza}" | sed "s|/|\/|g")
+    configureUserShellAliasPattern=$(echo "${configureUserShellAliasPattern}" | sed "s|[.]|\.|g")
+    sed -i "\|^.*${configureUserShellAliasPattern}.*$|d" "${aliasesFile}"
+    echo "${configureUserShellAliasStanza}" >> "${aliasesFile}"
   fi
   echo "Finished adding aliases"
 }
