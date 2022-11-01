@@ -256,7 +256,7 @@ is_valid_cidr() {
     return 1
 }
 
-# Returns true (i.e return code 0) if the answer supplied is on of "Yes", "yes", "YES" or "y" or "0"
+# Returns true (i.e return code 0) if the answer supplied is on of "Yes", "yes", "YES", "y", "TRUE", "true" or "0"
 # 0 is used as true because shell and linux uses 0 as success when a function returns successfully
 # Args:
 #   $1 (answer) : the answer provided
@@ -468,10 +468,30 @@ are_all_listed_packages_installed(){
 }
 
 # Prints the values that will be accepted as confirmation of an instruction
+
 print_confirmation_instructions(){
   echo "Only 'YES', 'Yes', 'yes', 'y', 'true' or 'TRUE' will be accepted as as confirmation"
 }
 
+# Prints system setup completion message
+# Args:
+#   $1 (isMainframe): if true, some additional mainframe messages are printed
+print_system_setup_completion_message() {
+  local isMainframe=${1:-n}
+  local osVersion
+  local osName
+  get_os_version osVersion
+  get_os_name osName
+  echo "**********************************************************************************"
+  echo "* Finished configuring your ${osName} ${osVersion} system"
+  echo "* If you are not logged into ZSH shell, you can log into ZSH using command 'zsh' "
+  if is_true "${isMainframe}"; then
+    echo "* You can now install VMWare Workstation"
+  fi
+  echo "* Your system is now ready for use       "
+  echo "**********************************************************************************"
+
+}
 
 # Given an Ip Address, will supply a naive cidr block i.e. this method strips of the last octet in ip address
 # and replaces it with "0/24" e.g. given an Ip address 192.168.0.2, will return 192.168.0.0/24
@@ -697,50 +717,57 @@ delete_dir () {
 #       $1 (out profile file): The profile file returned from this function. the caller of this function must provide a variable which
 #           be set by this function to the file name of the profile
 #        --user (optional): if supplied, will return the profile file for the given user
+#        --shell (optional): if supplied, the profile file for the supplied shell will be returned.
+#                            If not supplied, the profile file of the currently executing shell (i.e. ${SHELL})
+#                            will be returned
 #
 get_profile_file() {
-
     local  __resultvar=$1
     local profile
     local userHome
     local user=$(whoami)
+    local shell=$(basename "${SHELL}")
 
-    if [ "$user" = "root" ]; then
-      userHome="/${user}"
-    else
-      userHome="/home/${user}"
-    fi
-
-     # shift one places
+      # shift one places
       shift
       while [ $# -gt 0 ]; do
         case "$1" in
           --user=*)
-            userHome=/home/"${1#*=}"
+            user="${1#*=}"
+            ;;
+          --shell=*)
+            shell=$(basename "${1#*=}")
             ;;
           *)
         esac
         shift
       done
 
+    if [ "$user" == "root" ]; then
+      userHome="/${user}"
+    else
+      userHome="/home/${user}"
+    fi
     local zshProfile="${userHome}/.zshrc"
 
-    if [ "${SHELL}" == "/bin/zsh" ]; then
-
+    if [ "${shell}" == "$(basename /bin/zsh)" ]; then
         profile=${zshProfile}
 
-    elif [ "${SHELL}" == "/bin/bash" ]; then
+    elif [ "${shell}" == "$(basename /bin/bash)" ] || [ "${shell}" == "$(basename /bin/sh)" ]; then
 
         if [ -f "${userHome}/.bash_profile" ]; then
           profile="${userHome}/.bash_profile"
         elif [ -f "${userHome}/.profile" ]; then
           profile="${userHome}/.profile"
         fi
+
+    else
+      local errMsgSuffix="Please provide one of \"bash\", \"sh\" or \"zsh\" to the --shell argument"
+      print_stack_trace "UNKOWN SHELL \"${shell}\". Profile file cannot be provided for unknown shell \"${shell}\" " "${errMsgSuffix}"
     fi
 
     # this is the value that is returned to the caller of this function
     eval $__resultvar="'${profile}'"
-
 }
 
 # Returns the subshell that a script or executinng command is being run in
@@ -779,7 +806,6 @@ function get_fullpath_of_currently_executing_file() {
   local __fullFilePathOut__=$1
   local fullFilePath
   local sourceDir
-
 # get the correct absolute full name of the scripts-infra  directory (i.e. the directory containing this script)
 # this makes sure that no matter where this file is sourced from,
 # INFRA_SCRIPTS_ROOT will always be set to the correct absolute directory i.e. the directory containing
@@ -807,7 +833,6 @@ function get_fullpath_of_currently_executing_file() {
          # see https://stackoverflow.com/questions/59895/how-to-get-the-source-directory-of-a-bash-script-from-within-the-script-itself
         # for more info
         source="${BASH_SOURCE[0]}"
-
      elif [[ "${shell}" = "zsh"  ]]; then
          source="$( cd "$(dirname "${funcfiletrace[1]}")">/dev/null 2>&1 ; pwd -P )"
      fi
@@ -1109,7 +1134,8 @@ configure_user_shell() {
 
   local sharedFuncLibFile="${sharedScriptsDir}/lib/shared_funcs.sh"
   chmod u=rwx,g=rwx,o=rwx "${sharedScriptsDir}"
-  su -p -c "
+
+  su -p  -c "
   user=\$(whoami)
    if [ \"\$user\" = \"root\" ]; then
       userHome=\"/root\"
@@ -1123,7 +1149,7 @@ configure_user_shell() {
   source ${thisFile};
   profileFile=
   userHome=
-  get_profile_file profileFile
+  get_profile_file profileFile --shell=bash
   HOME=\${userHome} source \${profileFile};
   do_configure_user_shell ${__user__}" "${__user__}"
 }
@@ -1139,7 +1165,7 @@ do_configure_user_shell(){
 
   echo "Configuring shell for user ${__user__} ..."
   get_os_flavour flavour
-  if [ "${__user__}" = "root" ]; then
+  if [ "${__user__}" == "root" ]; then
     userHome="/root"
   else
     userHome="/home/${__user__}"
@@ -2395,7 +2421,7 @@ install_zsh_and_oh_my_zsh() {
   local zshPkg=("zsh")
 
   local bashProfile
-  get_profile_file bashProfile --user="${userUnderConfig}"
+  get_profile_file bashProfile --user="${userUnderConfig}" --shell="bash"
   local sourceBashrcStanza
   local flavour
   get_os_flavour flavour
@@ -2433,7 +2459,17 @@ EOF'
   echo "Installing zsh ..."
   local
   install_packages zshPkg
-  chsh -s /bin/zsh $userUnderConfig
+  if [ "${userUnderConfig}" != "root" ]; then
+    chsh -s /bin/zsh $userUnderConfig
+  else
+    echo  "************************** !! PROHIBITED ACTION !!*********************************"
+    echo "* You are prohibited from permanently changing shell of user root as              *"
+    echo "* changing root's shell can cause subtle and hard debug to errors                 *"
+    echo "* If you want to use zsh or oh-my-zsh when logged in as root                      *"
+    echo "* Please issue command '/bin/zsh' when you logged at the default root shell       *"
+    echo "************************** Skipped Changing root's shell **************************"
+  fi
+
   echo "Finished installing zsh ..."
 
   add_empty_line
@@ -2444,7 +2480,6 @@ EOF'
   ZSH=$userUnderConfigHome/.oh-my-zsh
   ZSH_CUSTOM=$ZSH/custom
 
-
   delete_dir $ZSH
 
   # ZSH=$userUnderConfigHome/.oh-my-zsh sh -c "$(wget -qO- https://raw.githubusercontent.com/ohmyzsh/ohmyzsh/master/tools/install.sh)" | zsh -c exit
@@ -2452,7 +2487,7 @@ EOF'
   # INSTALL_SCRIPT=$(wget https://github.com/robbyrussell/oh-my-zsh/raw/master/tools/install.sh -O -)
   # echo "INSTALL_SCRIPT: $INSTALL_SCRIPT"
 
-  /bin/cp $userUnderConfigHome/.oh-my-zsh/templates/zshrc.zsh-template $userUnderConfigHome/.zshrc
+  /bin/cp -v $userUnderConfigHome/.oh-my-zsh/templates/zshrc.zsh-template $userUnderConfigHome/.zshrc
   echo "Finished installing Oh-My-Zsh ..."
 
   add_empty_line
@@ -2495,8 +2530,6 @@ EOF'
   # Create ~/.zshrc
   echo "Creating custom $userUnderConfigHome/.zshrc ..."
   backup_file $userUnderConfigHome/.zshrc
-
-
 
   cat <<- EOF > $userUnderConfigHome/.zshrc
 # If you come from bash you might have to change your \$PATH.
@@ -2644,8 +2677,7 @@ bindkey "[D" backward-word
 
 EOF
 
-  HOME=$origHome
-
+  HOME=${origHome}
   echo "Finished creating custom $userUnderConfigHome/.zshrc "
 
   add_empty_line
