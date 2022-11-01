@@ -3882,7 +3882,7 @@ list_all_autostarted_vms_from_autostart_config(){
     return 1
   fi
 
-  echo "All auto started VMs in VM auto start config file ${VMWARE_AUTOSTART_CONFIG}"
+  echo "All VMs with 'autoStart=true' in VM auto start config file ${VMWARE_AUTOSTART_CONFIG}"
   jq '(.vms[] | select(.autostart == true) | .name)' ${VMWARE_AUTOSTART_CONFIG}
 }
 
