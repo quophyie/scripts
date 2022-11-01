@@ -3730,6 +3730,11 @@ EOF'
     return 1
   fi
 
+  if [ ! -e "${vmxPath}" ]; then
+    print_stack_trace "Invalid VM vmxPath ${vmxPath}. Please check and supply vmxPath as arg 2"
+    return 1
+  fi
+
   if [ -z "${VMWARE_AUTOSTART_CONFIG}" ]; then
 
     local errMsg="Environment variable VMWARE_AUTOSTART_CONFIG has not been set"
@@ -3786,9 +3791,9 @@ delete_vm_from_vm_autostart_config(){
 
 # Updates the given VM in the VMs autostart config file  (i.e. env var VMWARE_AUTOSTART_CONFIG=/opt/vmware_autostart/config.json)
 #   $1 (vmName): the name of the VM to update
-#   $2 (newVmConfigName [Optional]): the new name of the VM to in the config
-#   $2 (vmxPath [Optional]): If proThe vmx path of the VM to update
-#   $3 (autoStart [Optional]): determines whether VM should be auto started when host is rebooted
+#   --new_vm_config_name ([Optional]) : the new name of the VM to in the config
+#   --vmxpath [Optional]: If provided, The vmx path of the VM to update
+#   --autostart [Optional]: determines whether VM should be auto started when host is rebooted
 update_vm_config_in_vm_autostart_config (){
   require_root_access
   local vmName=$1
@@ -3817,7 +3822,6 @@ update_vm_config_in_vm_autostart_config (){
     shift
   done
 
-
   if [ -z "${vmName}" ]; then
     print_stack_trace "Arg1 (i.e vmName) is required. Please supply the name of the VM to updated as  as arg 1"
     return 1
@@ -3839,7 +3843,7 @@ update_vm_config_in_vm_autostart_config (){
       vmName=${newVmConfigName}
     else
       echo "A VM called ${newVmConfigName} already exists in auto start config ${VMWARE_AUTOSTART_CONFIG} ..."
-      echo "Please supply an alternative new name for the VM name and try again . Skipping ..."
+      echo "Please supply an alternative new name for the VM name in the --new_vm_config_name arg and try again . Skipping ..."
     fi
   fi
 
@@ -3847,7 +3851,7 @@ update_vm_config_in_vm_autostart_config (){
     if [ -e "${vmxPath}" ]; then
       jq --arg vmName ${vmName} --arg vmxPath ${vmxPath} -r '(.vms[] | select(.name == $vmName) | .vmxpath) |= $vmxPath' ${VMWARE_AUTOSTART_CONFIG}   > /tmp/tmp.json && mv /tmp/tmp.json ${VMWARE_AUTOSTART_CONFIG}
     else
-      echo "Invalid VM vmxpath given.. Skipping ..."
+      echo "Invalid VM vmxpath given in --vmxpath arg. Skipping ..."
     fi
   fi
 
@@ -3855,13 +3859,49 @@ update_vm_config_in_vm_autostart_config (){
     if [ "true" = "${autoStart}" ] || [ "false" = "${autoStart}" ] ; then
       jq --arg vmName ${vmName} --argjson autoStart ${autoStart} -r '(.vms[] | select(.name == $vmName) | .autostart) = $autoStart' ${VMWARE_AUTOSTART_CONFIG}  > /tmp/tmp.json && mv /tmp/tmp.json ${VMWARE_AUTOSTART_CONFIG}
     else
-      echo "Invalid VM autostart value given. Acceptable values are 'true' or 'false'.  Skipping ..."
+      echo "Invalid VM autostart value given in the --autostart arg. Acceptable values are 'true' or 'false'.  Skipping ..."
     fi
   fi
 
   echo "Finished updating vm $vmName in VM auto start config ..."
 }
 
+# Lists all vms that in the autostart config that have the autostart property set to true
+# in the autostart config file (i.e value pointed to by VMWARE_AUTOSTART_CONFIG
+# env var which usually has a value of /opt/vmware_autostart/config.json)
+# (i.e value pointed to by VMWARE_AUTOSTART_CONFIG env var which usually has a value of /opt/vmware_autostart/config.json)
+# Args:
+list_all_autostarted_vms_from_autostart_config(){
+  require_root_access
+
+  if [ -z "${VMWARE_AUTOSTART_CONFIG}" ]; then
+
+    local errMsg="Environment variable VMWARE_AUTOSTART_CONFIG has not been set"
+    local suffixMsg="Please run function create_vmware_autostart_service to set VMWARE_AUTOSTART_CONFIG\nDefault VMWARE_AUTOSTART_CONFIG=/opt/vmware_autostart/config.json"
+    print_stack_trace "${errMsg}" "${suffixMsg}"
+    return 1
+  fi
+
+  echo "All auto started VMs in VM auto start config file ${VMWARE_AUTOSTART_CONFIG}"
+  jq '(.vms[] | select(.autostart == true) | .name)' ${VMWARE_AUTOSTART_CONFIG}
+}
+
+# Lists all vms that that are in the autostart config file (i.e value pointed to by VMWARE_AUTOSTART_CONFIG
+# env var which usually has a value of /opt/vmware_autostart/config.json)
+list_all_vms_in_autostart_config(){
+  require_root_access
+
+  if [ -z "${VMWARE_AUTOSTART_CONFIG}" ]; then
+
+    local errMsg="Environment variable VMWARE_AUTOSTART_CONFIG has not been set"
+    local suffixMsg="Please run function create_vmware_autostart_service to set VMWARE_AUTOSTART_CONFIG\nDefault VMWARE_AUTOSTART_CONFIG=/opt/vmware_autostart/config.json"
+    print_stack_trace "${errMsg}" "${suffixMsg}"
+    return 1
+  fi
+
+  echo "All VMs in VM auto start config file ${VMWARE_AUTOSTART_CONFIG}"
+  jq '(.vms[] | .name)' ${VMWARE_AUTOSTART_CONFIG}
+}
 
 # TODO
 # Fix Installing powerline TTY fonts for Debian / Ubuntu
