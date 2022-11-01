@@ -1,7 +1,7 @@
 #!/bin/bash
 # Fail script execution if any function or snippet fails
 set -e
-source ./shared_funcs.sh
+source "${PWD}/shared_funcs.sh"
 
 ## Configures /etc/resolv.conf
 #create_nameserver_config(){
@@ -162,12 +162,19 @@ main() {
   add_empty_line
   install_git
   add_empty_line
-  #install_powerline_fonts "$USER_UNDER_CONFIG_HOME" "$VCONSOLE_CONF"
   install_zsh_and_oh_my_zsh "$USER_UNDER_CONFIG" "$USER_UNDER_CONFIG_HOME" "$VCONSOLE_CONF"
+  install_zsh_and_oh_my_zsh "root" "/root" "$VCONSOLE_CONF"
+
   configure_networking "$NIC" "$HOSTNAME" --local_nameserver_ip="${NS_IP}" --local_dns_domain_name="${NS_DOMAIN_NAME}"
+  configure_user_shell "$USER_UNDER_CONFIG"
+  configure_user_shell "root"
   if is_true "$CONFIRM_CONFIGURE_DDNS_UPDATES"; then
     configure_dynamic_dns_client "$NS_IP" "$NS_NAME" "$NS_DOMAIN_NAME" "$NIC" "$TRY_COPY_DDNS_UPDATE_KEY" "$NS_USER" "$NS_PASS" "$DDNS_UPDATE_KEY" "$DDNS_UPDATE_KEY_ON_NS_SERVER"
   fi
+
+  add_empty_line
+  print_system_setup_completion_message 1
+
 }
 
 # Call main
