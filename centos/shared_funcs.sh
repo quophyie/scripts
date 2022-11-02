@@ -43,7 +43,7 @@ function require_root_access() {
   if [ "$script_caller" != "root" ]; then
       print_stack_trace "********************************************************
 This script / command must be executed by user 'root'.
-Please use 'sudo' to execute this script / command or login as user
+Please use 'sudo -E' to execute this script / command or login as user
 root before executing this script / commands
 ********************************************************"
 
@@ -401,6 +401,45 @@ is_vm_in_vm_autostart_config () {
   fi
 
   return 1
+}
+
+# Returns the property value for the VM specified
+# Args:
+#     $1 (vmName): the name of the VM to check
+#     $2 (propertyName): the name of the VM to check
+#     $3 (OUT propertyValue): the value of the property will be placed in this value if the property is found
+get_property_value_in_vm_autoconfig () {
+  require_root_access
+  local vmName=$1
+  local propertyName=$2
+  local __propertyValue__=$3
+  local propVal
+  local foundVmConfig
+  if [ -z "${vmName}" ]; then
+    print_stack_trace "Arg1 (i.e vmName) is required. Please supply vmName as arg 1"
+    return 1
+  fi
+
+    if [ -z "${propertyName}" ]; then
+      print_stack_trace "Arg2 (i.e propertyName) is required. Please supply vmName as arg 3"
+      return 1
+    fi
+
+  if [ -z "${VMWARE_AUTOSTART_CONFIG}" ]; then
+
+    local errMsg="Environment variable VMWARE_AUTOSTART_CONFIG has not been set"
+    local suffixMsg="Please run function create_vmware_autostart_service to set VMWARE_AUTOSTART_CONFIG\nDefault VMWARE_AUTOSTART_CONFIG=/opt/vmware_autostart/config.json"
+    print_stack_trace "${errMsg}" "${suffixMsg}"
+    return 1
+  fi
+
+  if ! is_vm_in_vm_autostart_config "${vmName}"; then
+    print_stack_trace "VM ${vmName} not found in VM auto config file ${VMWARE_AUTOSTART_CONFIG}"
+  fi
+
+  propVal=$(jq --arg vmName ${vmName} --arg propertyName ${propertyName} -r '(.vms[] |  select(.name == $vmName) | .[$propertyName])' ${VMWARE_AUTOSTART_CONFIG} )
+
+  return_function_result "$propVal" "$__propertyValue__"
 }
 
 # Will return true i.e. 0 if the supplied nic provided is a wireless nic. False otherwise
@@ -798,6 +837,67 @@ function get_sub_shell(){
 
 }
 
+# Sources the profile file used in the shell
+#   Arg:
+#        --user (optional): if supplied, will source profile file for the given user otherwise will source profile
+#                           for the caller of this function
+#        --shell (optional): if supplied, the profile file for the supplied shell will be sourced.
+#                            The accepted values are 'sh', 'bash' or 'zsh'
+#                            If not supplied, the profile file of the currently executing shell (i.e. ${SHELL})
+#                            will be sourced
+#
+source_shell_profiles() {
+  local  __resultvar=$1
+  local profileFile
+  local userHome
+  local user=$(whoami)
+  local shell=$(basename "${SHELL}")
+  local shellExecutablePath="${SHELL}"
+
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --user=*)
+        user="${1#*=}"
+        ;;
+      --shell=*)
+        shell=$(basename "${1#*=}")
+        ;;
+      *)
+    esac
+    shift
+    done
+
+  if [ "${shell}" != "bash" ] && [ "${shell}" != "sh" ] && [ "${shell}" != "zsh" ]; then
+
+      local errMsgSuffix="Please provide one of \"bash\", \"sh\" or \"zsh\" to the --shell argument"
+      print_stack_trace "UNKOWN SHELL \"${shell}\". Profile file cannot be provided for unknown shell \"${shell}\" " "${errMsgSuffix}"
+  fi
+
+  if [ "${shell}" == "bash" ] && [ -e "/bin/bash" ]; then
+    shellExecutablePath="/bin/bash"
+  elif [ "${shell}" == "sh" ] && [ -e "/bin/sh" ]; then
+      shellExecutablePath="/bin/sh"
+  elif [ "${shell}" == "zsh" ] && [ -e "/bin/zsh" ]; then
+      shellExecutablePath="/bin/zsh"
+  fi
+
+  if [ "$user" == "root" ]; then
+    require_root_access
+  fi
+
+  get_profile_file profileFile --user="${user}" --shell="${shell}"
+
+  if [ -e "${profileFile}" ]; then
+    #   set +e  DO NOT Exit/stop if a command exits with a non-zero status.
+    set +e
+    echo "sourcing ${profileFile} for shell ${shellExecutablePath} ..."
+    $shellExecutablePath -p -c "source ${profileFile}; echo \"successfully sourced ${profileFile}\" "
+    set -e
+  else
+    print_stack_trace "could not source shell profile as profile file could not be found"
+  fi
+}
+
 # Returns the full path of this file
 #   $1(OUT filePathOut): A var to hold value of the full file path.
 #                               This variable MUST NOT BE PASSED IN the expanded from i.e.
@@ -913,6 +1013,126 @@ install_shared_func(){
   echo "Finished installing shared functions script ${sharedScriptsFile}"
   return_function_result "${sharedScriptsFile}" "${__shared_funcs_lib__}"
 
+}
+
+
+# Adds or Updates ~/.bashrc with an environment variable
+# Args:
+#   $1 (user): the user whose ~/.bashrc is to be configured
+#   $2 (envVarName): The name of the environment variable
+#   $3 (envVarValue): The value of the environment variable
+add_or_update_env_var_in_bashrc(){
+
+  local user=$1
+  local envVarName=$2
+  local envVarValue=$3
+  local envVarCurrentVal="${!envVarName}"
+  local flavour
+  local bashrc
+  local userHome
+  local envVarRegPattern
+  local envVarInsertionPointRegPattern
+  local envVarInsertionPoint
+  local envVarInsertionText
+
+  get_os_flavour flavour
+
+  if [ -z "${user}" ]; then
+    local errMsgSuffix="Please supply user as arg 1 to add_or_update_env_var_in_profile_file"
+    print_stack_trace "user is required for calls to add_or_update_env_var_in_profile_file" "${errMsgSuffix}"
+  fi
+
+  if [ -z "${envVarName}" ]; then
+    local errMsgSuffix="Please supply environment variable name as arg 2 to add_or_update_env_var_in_profile_file"
+    print_stack_trace "environment variable name is required for calls to add_or_update_env_var_in_profile_file function" "${errMsgSuffix}"
+  fi
+
+  if [ -z "${envVarValue}" ]; then
+    local errMsgSuffix="Please supply environment variable value as arg 3 to add_or_update_env_var_in_profile_file"
+    print_stack_trace "environment variable value is required for calls to add_or_update_env_var_in_profile_file function" "${errMsgSuffix}"
+  fi
+
+  if [ "${user}" = "root" ]; then
+    userHome="/root"
+  else
+    userHome="/home/${user}"
+  fi
+
+  bashrc="${userHome}/.bashrc"
+
+  echo "Updating user ${user}  bashrc file ${bashrc} with environment variable ${envVarName}=${envVarValue} ..."
+
+  # Update ~/.bashrc with SHARED_SCRIPTS_DIR env var
+  # Update ~/.bashrc source shared_funcs.sh
+  echo "envVarCurrentVal ===>  ${envVarCurrentVal}"
+  if [ -z "${envVarCurrentVal}" ]; then
+    # escape backslashes
+    envVarRegPattern=$(echo "${envVarCurrentVal}" | sed "s|/|\/|g")
+    envVarRegPattern="^\s*export SHARED_SCRIPTS_DIR=${envVarRegPattern}\s*$"
+
+    backup_file "${bashrc}"
+    if ! grep -iP "${envVarRegPattern}" "${bashrc}" ; then
+
+      # Delete all lines that export ${envVarName}=${envVarValue} statement line
+      envVarRegPattern=$(echo "${envVarValue}" | sed "s|/|\/|g")
+      envVarRegPattern="^\s*export ${envVarName}=${envVarValue}.*\s*$"
+      envVarRegPattern=$(echo "${envVarRegPattern}" | sed "s|[.]|\.|g")
+      sed -i "\|${envVarRegPattern}|d" "${bashrc}"
+
+      if [ "fedora" == "${flavour}" ]; then
+        echo "Configuring ${envVarName} env var in  Fedora Flavoured OS ${bashrc}"
+        envInsertionPoint="# .bashrc"
+        envVarInsertionText=$(eval 'cat << EOF
+# .bashrc
+
+export ${envVarName}=${envVarValue}
+EOF')
+        envVarInsertionPointRegPattern=$(echo "${envInsertionPoint}" | perl -p -e  "s|[.]|\.|g")
+        # Multipline replace
+        perl -pi -e "s|${envVarInsertionPointRegPattern}|${envVarInsertionText}|" "${bashrc}"
+      else
+        echo "Configuring ${envVarName} env var in  Debian Flavoured OS ${bashrc}"
+        envVarInsertionPoint="# for examples"
+        envVarInsertionText=$(eval 'cat << EOF
+# for examples
+
+export ${envVarName}=${envVarValue}
+EOF')
+        envVarInsertionPointRegPattern=$(echo "${envVarInsertionPoint}" | perl -p -e "s|[.]|\.|g")
+        # Multipline replace
+         perl -pi -e "s|${envVarInsertionPointRegPattern}|${envVarInsertionText}|" "${bashrc}"
+      fi
+    else
+      echo "bashrc (i.e ${bashrc}) already contains SHARED_SCRIPTS_DIR environment variable export statement ie."
+      echo "\"${envVarInsertionPointRegPattern}\""
+      echo "Nothing to do!! .. Skipping"""
+    fi
+  else
+    echo "Found ${envVarName} env var in ${bashrc}"
+    # escape all the forward slashes
+    envVarRegPattern=$(echo "${envVarValue}" | sed "s|/|\/|g")
+    envVarRegPattern="^\s*export ${envVarName}=${envVarValue}.*\s*$"
+    envVarRegPattern=$(echo "${envVarRegPattern}" | sed "s|[.]|\.|g")
+
+    envVarPlaceHolder="REPLACE_THIS_PLACEHOLDER_WITH_${envVarName}"
+    # Replace the first instance of the shared directory export statement with the envVarRegPattern
+    # The sed address will replace the 1st occurrence envVarRegPattern
+    # Note how we change the delimimter from forward slash to | (i.e pipe) with the \| command
+    # We change the delimimter because sharedScriptsDirRegPattern contains forward slashes
+    sed -i "0,\|^${envVarRegPattern}$|s|^$envVarRegPattern$|${envVarPlaceHolder}|" "${bashrc}"
+
+    # Delete the rest of the shared directory export statements
+    # Note how we change the delimimter from forward slash to | (i.e pipe) with the \| command
+    # We change the delimimter because sharedScriptsDirRegPattern contains forward slashes
+    sed -i "\|^${envVarRegPattern}$|d" "${bashrc}"
+    envVarInsertionText="export ${envVarName}=${envVarValue}"
+    if grep -iP "${envVarPlaceHolder}" "${bashrc}" ; then
+      echo "Updating ${envVarName} with value env var in ${bashrc}"
+      sed -i "s|${envVarPlaceHolder}|${envVarInsertionText}|g" "${bashrc}"
+    fi
+  fi
+  source "${bashrc}"
+   echo "Finished updating user ${user}  bashrc file ${bashrc} with environment variable ${envVarName}=${envVarValue}"
 }
 
 # configures shell aliases
@@ -3614,8 +3834,7 @@ EOF
     echo "Finished creating ${vmwareAutoStartConfig} ..."
   fi
 
-  echo "Exporting VMWARE_AUTOSTART_CONFIG=${vmwareAutoStartConfig} "
-  export VMWARE_AUTOSTART_CONFIG=${vmwareAutoStartConfig}
+  add_or_update_env_var_in_bashrc "${user}" "VMWARE_AUTOSTART_CONFIG" "${vmwareAutoStartConfig}"
 
   cat <<EOF > $vmwareAutoStartScript
 #!/bin/bash
@@ -3796,6 +4015,7 @@ delete_vm_from_vm_autostart_config(){
 #   --autostart [Optional]: determines whether VM should be auto started when host is rebooted
 update_vm_config_in_vm_autostart_config (){
   require_root_access
+
   local vmName=$1
   local newVmConfigName
   local vmxPath
@@ -3903,6 +4123,104 @@ list_all_vms_in_autostart_config(){
   jq '(.vms[] | .name)' ${VMWARE_AUTOSTART_CONFIG}
 }
 
+# Starts the named VM if its in the VM auto start config file (i.e value pointed to by VMWARE_AUTOSTART_CONFIG
+# env var which usually has a value of /opt/vmware_autostart/config.json)
+# Args:
+#   $1 (vmName): the name of the vm to start
+start_autostart_config_vm(){
+  require_root_access
+  local vmName=${1}
+
+  if [ -z "${VMWARE_AUTOSTART_CONFIG}" ]; then
+
+    local errMsg="Environment variable VMWARE_AUTOSTART_CONFIG has not been set"
+    local suffixMsg="Please run function create_vmware_autostart_service to set VMWARE_AUTOSTART_CONFIG\nDefault VMWARE_AUTOSTART_CONFIG=/opt/vmware_autostart/config.json"
+    print_stack_trace "${errMsg}" "${suffixMsg}"
+    return 1
+  fi
+
+
+  if [ -z "${vmName}" ]; then
+    print_stack_trace "Arg1 (i.e vmName) is required. Please supply the name of the VM to updated as  as arg 1"
+    return 1
+  fi
+
+  if is_vm_in_vm_autostart_config "${vmName}"; then
+    local vmxPath
+    get_property_value_in_vm_autoconfig "${vmName}" "vmxpath" vmxPath
+    echo "Starting VM $vmName ..."
+    /usr/bin/vmrun -T ws start "$vmxPath" nogui 2>/dev/null && echo "$vmName started." || echo "$vmName failed to started"
+  else
+    local errMsgSuffix="Please check and try again or use command vmrun to run VM directly"
+    print_stack_trace "Could not find VM  \"${vmName}\"  in ${VMWARE_AUTOSTART_CONFIG}" "${errMsgSuffix}"
+  fi
+}
+
+# Stops the named VM if its in the VM auto start config file (i.e value pointed to by VMWARE_AUTOSTART_CONFIG
+# env var which usually has a value of /opt/vmware_autostart/config.json)
+# Args:
+#   $1 (vmName): the name of the vm to stop
+stop_autostart_config_vm(){
+  require_root_access
+  local vmName=${1}
+
+  if [ -z "${VMWARE_AUTOSTART_CONFIG}" ]; then
+
+    local errMsg="Environment variable VMWARE_AUTOSTART_CONFIG has not been set"
+    local suffixMsg="Please run function create_vmware_autostart_service to set VMWARE_AUTOSTART_CONFIG\nDefault VMWARE_AUTOSTART_CONFIG=/opt/vmware_autostart/config.json"
+    print_stack_trace "${errMsg}" "${suffixMsg}"
+    return 1
+  fi
+
+
+  if [ -z "${vmName}" ]; then
+    print_stack_trace "Arg1 (i.e vmName) is required. Please supply the name of the VM to updated as  as arg 1"
+    return 1
+  fi
+
+  if is_vm_in_vm_autostart_config "${vmName}"; then
+    local vmxPath
+    get_property_value_in_vm_autoconfig "${vmName}" "vmxpath" vmxPath
+    echo "Stopping VM $vmName ..."
+    /usr/bin/vmrun -T ws stop "$vmxPath" nogui 2>/dev/null && echo "$vmName stopped." || echo "$vmName failed to stop."
+  else
+    local errMsgSuffix="Please check and try again or use command vmrun to run VM directly"
+    print_stack_trace "Could not find VM  \"${vmName}\"  in ${VMWARE_AUTOSTART_CONFIG}" "${errMsgSuffix}"
+  fi
+}
+
+# Reboots the named VM if its in the VM auto start config file (i.e value pointed to by VMWARE_AUTOSTART_CONFIG
+# env var which usually has a value of /opt/vmware_autostart/config.json)
+# Args:
+#   $1 (vmName): the name of the vm to reboot
+reboot_autostart_config_vm(){
+  require_root_access
+  local vmName=${1}
+
+  if [ -z "${VMWARE_AUTOSTART_CONFIG}" ]; then
+
+    local errMsg="Environment variable VMWARE_AUTOSTART_CONFIG has not been set"
+    local suffixMsg="Please run function create_vmware_autostart_service to set VMWARE_AUTOSTART_CONFIG\nDefault VMWARE_AUTOSTART_CONFIG=/opt/vmware_autostart/config.json"
+    print_stack_trace "${errMsg}" "${suffixMsg}"
+    return 1
+  fi
+
+
+  if [ -z "${vmName}" ]; then
+    print_stack_trace "Arg1 (i.e vmName) is required. Please supply the name of the VM to updated as  as arg 1"
+    return 1
+  fi
+
+  if is_vm_in_vm_autostart_config "${vmName}"; then
+    local vmxPath
+    get_property_value_in_vm_autoconfig "${vmName}" "vmxpath" vmxPath
+    echo "Rebooting VM $vmName ..."
+    /usr/bin/vmrun -T ws reset "$vmxPath" nogui  2>/dev/null && echo "$vmName rebooted" || echo "$vmName failed to reboot"
+  else
+    local errMsgSuffix="Please check and try again or use command vmrun to run VM directly"
+    print_stack_trace "Could not find VM  \"${vmName}\"  in ${VMWARE_AUTOSTART_CONFIG}" "${errMsgSuffix}"
+  fi
+}
 # TODO
 # Fix Installing powerline TTY fonts for Debian / Ubuntu
 # Complete DNS Configuration for Fedora and Centos
