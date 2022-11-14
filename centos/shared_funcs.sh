@@ -442,6 +442,63 @@ get_property_value_in_vm_autoconfig () {
   return_function_result "$propVal" "$__propertyValue__"
 }
 
+# Will return true i.e. 0 if the supplied nic name is valid and can be found by NetworkManager
+# Args:
+#     $1 (nic): the name of the nic to check
+is_valid_nic (){
+  local __nic__=$1
+
+  if  [ -z "$__nic__" ]; then
+    local stackSuffixMsg="Please supply nic as arg 1"
+    print_stack_trace "Network interface name (nic) is required as arg 1" "$stackSuffixMsg"
+  fi
+
+  local foundDeviceName=`nmcli -f DEVICE,TYPE,STATE device | awk  -v devName="^${__nic__}$" '$1 ~ devName && NF <= 3 { print $1 }'`
+  local foundDeviceNamePattern="^${foundDeviceName}$"
+
+  if echo  "${__nic__}" | grep -iP "${foundDeviceNamePattern}" ; then
+    return 0
+  else
+    return 1
+  fi
+}
+
+
+# Will return true i.e. 0 if the supplied nic is active according to NetworkManager
+# Args:
+#     $1 (nic): the name of the nic to check
+is_active_nic (){
+  local __nic__=$1
+  local flavour
+
+  get_os_flavour flavour
+  if  [ -z "$__nic__" ]; then
+    local stackSuffixMsg="Please supply nic as arg 1"
+    print_stack_trace "Network interface name (nic) is required as arg 1" "$stackSuffixMsg"
+  fi
+
+  nmcli -f DEVICE,TYPE,STATE device
+  local foundDeviceName
+  # Set shell option so that script doesnt exit if there is an error from a command
+  set +e
+  foundDeviceName=`nmcli -f DEVICE,TYPE,STATE device | awk  -v devName="^${__nic__}$" '$1 ~ devName && NF <= 3 { print $1 }'`
+  if [ -z "${foundDeviceName}" ] && [ "${flavour}" == "debian" ]; then
+    foundDeviceName=`nmcli -f DEVICE,TYPE,STATE device | awk  -v devName="^netplan-${__nic__}$" '$1 ~ devName && NF <= 3 { print $1 }'`
+  fi
+  set -e
+
+  local connectedStatus=`nmcli -f DEVICE,TYPE,STATE device | awk -v connStat="^connected$" '$3 ~ connStat && NF <= 3 { print $3 }'`
+  local connectedStatusStanza="${__nic__}=connected"
+  local connectedStatusTestConditionStanza="${foundDeviceName}=${connectedStatus}"
+
+  if echo  "${connectedStatusTestConditionStanza}" | grep -iP "${connectedStatusStanza}"; then
+    return 0
+  else
+    return 1
+  fi
+}
+
+
 # Will return true i.e. 0 if the supplied nic provided is a wireless nic. False otherwise
 # Args:
 #     $1 (nic): the name of the nic to check
@@ -677,8 +734,10 @@ show_spinner() {
 }
 
 # Executes a command and shows a spinner
+# The spinner will exit when the command passed in $1 (arg 1) exits
 # Args:
-# $1 (command) : the command to execute with a spinner
+#   $1 (command) : the command to execute with a spinner
+#   Example Usage: exec_command_and_show_spinner sleep 3
 exec_command_and_show_spinner() {
   local command=$@
   # echo "THE COMMAND AND ARGS ARE $command"
@@ -986,7 +1045,7 @@ function get_or_create_shared_scripts_env_var_value() {
 # Args:
 #   $1 shared_funcs_lib: (OUT): When, provided the path to the  installed shared libs file will be placed in this variable
 # shellcheck disable=SC2120
-install_shared_func(){
+install_shared_funcs_lib(){
 
   local __shared_funcs_lib__=$1
   local sharedScriptsDir
@@ -1355,8 +1414,8 @@ configure_user_shell() {
   local sharedFuncLibFile="${sharedScriptsDir}/lib/shared_funcs.sh"
   chmod u=rwx,g=rwx,o=rwx "${sharedScriptsDir}"
 
-  su -p  -c "
-  user=\$(whoami)
+  sudo su -p -c "
+  user=${__user__}
    if [ \"\$user\" = \"root\" ]; then
       userHome=\"/root\"
     else
@@ -1372,6 +1431,24 @@ configure_user_shell() {
   get_profile_file profileFile --shell=bash
   HOME=\${userHome} source \${profileFile};
   do_configure_user_shell ${__user__}" "${__user__}"
+
+
+#  user=${__user__}
+#   if [ "$user" = "root" ]; then
+#      userHome="/root"
+#    else
+#      userHome="/home/${user}"
+#    fi
+#  local bashrc=~/.bashrc
+#  # sharedFuncLibFileRegPattern=\$(echo \"${sharedFuncLibFile}\" | sed \"s|/|\/|g\")
+#  # sharedFuncLibFileRegPattern=\$(echo \"\${sharedFuncLibFileRegPattern}\" | sed \"s|[.]|\.|g\")
+#  # sed -i \"\|^\${sharedFuncLibFileRegPattern}$|d\" \${bashrc}
+#  source "${thisFile}";
+#  local profileFile
+#  local userHome
+#  get_profile_file profileFile --shell=bash
+#  HOME="${userHome}" source "${profileFile}"
+#  do_configure_user_shell ${__user__}
 }
 
 # Configures the shell profiles for a user by setting up environment variables, functions,
@@ -1398,7 +1475,7 @@ do_configure_user_shell(){
     print_stack_trace "Cannot configure shell for Unknown OS flavour"
   fi
   configure_shell_aliases "${__user__}"
-  install_shared_func installedSharedScriptsLibFile
+  install_shared_funcs_lib installedSharedScriptsLibFile
   update_bashrc_with_env_vars_and_source_statements "${__user__}" "${installedSharedScriptsLibFile}"
   echo "sourcing ${profile} ..."
   source "${profile}"
@@ -1878,10 +1955,10 @@ configure_dynamic_dns_client () {
 configure_keymap () {
 
   echo "Configuring keymap ..."
-  local keymap=${1:-"us"}
+  local keymap=${1:-us}
   local vconsoleConf=$2
 
-
+  echo "Configuring keymap as ${keymap} in file ${vconsoleConf} ..."
   if grep -iP "^KEYMAP=.*$" $vconsoleConf ; then
    # Delete the keymap stanza in /etc/vconsole.conf and replace it with $keymap
    sed -i '/^KEYMAP=.*$/d' $vconsoleConf
@@ -2097,7 +2174,7 @@ EOF
 
 }
 
-# Configures Networking for the supplied nic
+# Configures Hostname and Networking for the supplied nic
 # Args:
 #   $1 (nic): the name of the NIC being configured for networking e.g.wlp7s0.
 #           This function will automatically determine if the NIC is an ethernet or wireless NIC
@@ -2152,6 +2229,11 @@ configure_networking(){
     print_stack_trace "The NIC (network interface card) is required for network configuration"
     return 1
   fi
+
+    if ! is_valid_nic "${nic}" ; then
+      print_stack_trace "The NIC (network interface card  i.e '${nic}') you provided is invalid. Please provide a valid NIC"
+      return 1
+    fi
 
   if [ -z "$hostname" ]; then
      print_stack_trace "The hostname of the server being configured is required. Please supply the hostname as arg 2"
@@ -2252,28 +2334,32 @@ configure_networking(){
   add_empty_line
   install_NetworkManager
 
-  if [ -n "${gatewayIpAddress}" ] || { is_ubuntu_18_04_or_later && is_true "${useDhcp}" && [ "${renderer}" == "NetworkManager" ]; }; then
+  if  { is_ubuntu_18_04_or_later && is_true "${useDhcp}" && [ "${renderer}" == "NetworkManager" ]; }; then
     add_empty_line
     # We should only execute this if we are using NetworkManager as netplan renderer useDhcp is true
     # and a gateway ip has not been supplied in debian based system (i.e Ubuntu)
     if [ -z "${gatewayIpAddress}" ] && { is_ubuntu_18_04_or_later && is_true "${useDhcp}" && [ "${renderer}" == "NetworkManager" ]; }; then
       get_default_gateway_ip gatewayIpAddress
-      echo "Defaulting to using default gateway ip address ${gatewayIpAddress} supplied by DHCP server to configure default gatway"
+      echo "Defaulting to using default gateway ip address ${gatewayIpAddress} supplied by DHCP server to configure NIC '${nic}' default gateway"
       echo
     fi
-    configure_default_gateway "${gatewayIpAddress}" "${hostname}" "${nic}"
+  elif [ -z "${gatewayIpAddress}" ]; then
+    get_default_gateway_ip gatewayIpAddress
+    echo "Defaulting to using default gateway ip address ${gatewayIpAddress} supplied by DHCP server to configure NIC '${nic}' default gateway"
   fi
+
+  configure_default_gateway "${gatewayIpAddress}" "${hostname}" "${nic}"
 
   add_empty_line
   create_nameserver_config "${hostname}" "${nic}" "${useLocalDNS}" "${localNameserverIp}" "${localDNSDomainName}"
-
+  configure_NIC_for_NetworkManager "${nic}" "${nic_ip}" "${gatewayIpAddress}" "${ssid}"
   if is_ubuntu_18_04_or_later; then
     #sudo ip route del default
     sudo netplan apply
   fi
   echo "finished configuring networking for NIC ${nic} on host ${hostname} "
-   #   +e  DO NOT Exit immediately if a command exits with a non-zero status.
-    set +e
+  #   +e  DO NOT Exit immediately if a command exits with a non-zero status.
+  set +e
 }
 
 # Configure the default gateway
@@ -2282,7 +2368,7 @@ configure_networking(){
 #   $2 (hostname): the hostname of the host being configured e.g. mainframe
 #   $3 (nic): required if configuring default GW for ubuntu 18.04 or later
 configure_default_gateway() {
-  echo "Configuring the default gateway ..."
+  echo "Configuring the default gateway for NIC '${nic}'..."
   local gatewayIpAddress=$1
   local hostname=$2
   local nic=$3
@@ -2351,9 +2437,10 @@ EOF
       echo "Default gateway config placeholder \"${netplanGatewayPlaceholder}\" not found in ${netplanConfig}. skipping ..."
     fi
   elif [ "$flavour" == "debian" ]; then
-    echo "Default Gateway not configuration not supported in Debian based systems. Skipping"
+    print_stack_trace "Default Gateway not configuration not supported in Debian based systems. Skipping"
   fi
 
+  echo "Finished configuring the default gateway for NIC '${nic}'..."
 }
 
 # Configures /etc/resolv.conf for fedora flavour OSes and /etc/netplan/01-network-manager-all.yaml for Ubuntu
@@ -2489,6 +2576,8 @@ configure_wpa_supplicant() {
   local wifiPassword=$4
   local nicConfigFile=$5
   local nicConfigBasePath=$6
+  local flavour
+  get_os_flavour flavour
 
   echo "Configuring wpa_supplicant ..."
   if [ "$flavour" == "fedora" ] ; then
@@ -2549,21 +2638,24 @@ NETWORK=192.168.0.0" > $nicConfigBasePath$nic
 }
 
 
-# Configures WiFi for the NIC using NetworkManager
+# Configures NIC for use with NetworkManager
 # Args:
 #   $1 (nic) : The name of the network interface card (NIC) e.g. wlan0
-#   $3 (nic_ip): The ip address of the NIC
-#   $3 (ssid): the SSID of the Wifi to connect to
-#   $5 (defaultGateway): The ip address of the default gateway
-configure_Wifi_For_NIC_using_NetworkManager(){
+#   $2 (nic_ip): The ip address of the NIC
+#   $3 (defaultGateway): The ip address of the default gateway
+#   $4 (ssid): the SSID of the Wifi to connect to
+configure_NIC_for_NetworkManager(){
   local nic=$1
   local nic_ip=$2
-  local ssid=$3
-  local defaultGateway=$4
+  local defaultGateway=$3
+  local ssid=$4
+  local connectionName
   echo "Configuring NIC $nic for NetworkManager ..."
   local dns_none_config_stanza="dns=none"
   local network_dns_override_conf=/etc/NetworkManager/conf.d/no-dns-override.conf
   local network_manager_conf=/etc/NetworkManager/NetworkManager.conf
+  local flavour
+  get_os_flavour flavour
 
   local myvar=`nmcli -f DEVICE,TYPE,STATE device | awk  '$3 ~ /^connected/ && NF <= 3 { print $1 }'`
 
@@ -2572,19 +2664,30 @@ configure_Wifi_For_NIC_using_NetworkManager(){
      return 1
   fi
 
+  if ! is_valid_nic "${nic}"; then
+    print_stack_trace "The nic '${nic}' is invalid. Please check and supply a valid a nic name"
+  fi
+
   if [ -z "$nic_ip" ]; then
       print_stack_trace "The nic ip is required. Please supply the nic ip name as arg 2"
       return 1
   fi
 
-  if [ -z "$ssid" ]; then
-    print_stack_trace "The SSID is required. Please supply the SSID as arg 3"
+  if [ -z "$defaultGateway" ]; then
+    print_stack_trace "The default gateway is required. Please supply the default gateway as arg 3"
     return 1
   fi
 
-  if [ -z "$defaultGateway" ]; then
-    print_stack_trace "The default gateway is required. Please supply the default gateway as arg 4"
+
+  if is_wireless_nic "${nic}" && [ -z "$ssid" ]; then
+    print_stack_trace "The SSID is required. Please supply the SSID as arg 4"
     return 1
+  fi
+
+  if is_wireless_nic "${nic}"; then
+    connectionName="${ssid}"
+  else
+    connectionName="${nic}"
   fi
 
 
@@ -2604,27 +2707,74 @@ dns=none" > $network_dns_override_conf
   systemctl restart NetworkManager.service
   systemctl enable NetworkManager.service
 
-  backup_file /etc/NetworkManager/system-connections/$ssid.nmconnection
-  nmcli con mod $ssid ipv4.addresses $nic_ip/24
-  nmcli con mod $ssid ipv4.gateway $defaultGateway
-  nmcli con mod $ssid ipv4.method manual
-  # nmcli con mod $SSID ipv4.dns "8.8.8.8 8.8.1.1"
-  systemctl restart NetworkManager.service
-  nmcli con down $ssid
-  nmcli con up $ssid
+  local nmConnectionFile="/etc/NetworkManager/system-connections/$connectionName.nmconnection"
+
+  if [ -f "/etc/NetworkManager/system-connections/$connectionName.nmconnection" ]; then
+    nmConnectionFile="/etc/NetworkManager/system-connections/$connectionName.nmconnection"
+  elif [ -f "/run/NetworkManager/system-connections/$connectionName.nmconnection"  ]; then
+    nmConnectionFile="/run/NetworkManager/system-connections/$connectionName.nmconnection"
+  elif [ -f "/run/NetworkManager/system-connections/netplan-$connectionName.nmconnection"  ]; then
+    nmConnectionFile="/run/NetworkManager/system-connections/netplan-$connectionName.nmconnection"
+  fi
+
+  backup_file "${nmConnectionFile}"
+  local nmConnectionFilePattern=$(echo "${nmConnectionFile}" | sed "s|/|\/|g")
+  if echo "${nmConnectionFilePattern}" | grep -iP "netplan-${connectionName}"; then
+    connectionName="netplan-${connectionName}"
+  fi
+  # We need to wait for NetworkManager to be enabled and restarted
+  # otherwise is_active_nic mat fail
+  exec_command_and_show_spinner echo "waiting for NetworkManager ..." && sleep 3
+  if is_active_nic "${nic}"; then
+    nmcli con mod "${connectionName}" ipv4.addresses "${nic_ip}"/24
+    nmcli con mod "${connectionName}" ipv4.gateway "${defaultGateway}"
+    nmcli con mod "${connectionName}" ipv4.method manual
+    # nmcli con mod $SSID ipv4.dns "8.8.8.8 8.8.1.1"
+    systemctl restart NetworkManager.service
+
+    local currentIp
+    get_ip "${nic}" currentIp
+
+    if [ "${nic_ip}" != "${currentIp}" ]; then
+      add_empty_line
+      local osVersion
+      local osName
+      get_os_version osVersion
+      get_os_name osName
+      echo "************************************************************************************************"
+      echo "* NetworkManager is about to configure a new IP address for NIC ${nic}"
+      echo "* You may be disconnected for short time period during the NIC configuration "
+      echo "* if you are remotely managing this server"
+      echo "* Finished configuring your ${osName} ${osVersion} system"
+      echo "* Your system is now ready for use"
+      add_empty_line
+      echo "************************************************************************************************"
+      echo "* Please reconnect using IP address ${nic_ip}"
+      echo "************************************************************************************************"
+      add_empty_line
+    fi
+
+    nmcli con down "${connectionName}"
+    nmcli con up "${connectionName}"
+  else
+    print_stack_trace "NIC '${nic}' is not active. Please provide an active NIC and try again"
+  fi
   echo "Finished configuring NIC $nic for NetworkManager"
 
 }
 
 #Configure, update and setup raid
 configure_raid() {
-
+  # set shell option so that we dont script doesnt exit if mdadm --assemble --scan fails
+  set +e
   echo "Configuring Raid ..."
   local raidConf=/etc/mdadm.conf
   backup_file $raidConf
   mdadm --examine --scan > $raidConf
   mdadm --assemble --scan
   echo "Finished configuring Raid ..."
+  # set shell option back to what it was
+  set -e
 }
 
 # Installs ZSH and configures Oh-My-ZSH
@@ -2969,7 +3119,7 @@ The provided run level $runLevel is unknown. Please select a number from the lis
 #   $1 (nic): The name of the nic whose ip is wanted
 #   $2 (out nicIp): The ip of the NIC will be placed in this variable when supplied by the caller of this method
 #  NOTE: then name of $2 (out nicIp) MUST NOT BE PASSED in the expanded form i.e. it  MUST not be prefixed by the $ symbol
-#  Example Usage: get_ip $nip nicIp
+#  Example Usage: get_ip $nic nicIp
 get_ip() {
   local nic=$1
   local ___result___=$2
@@ -2980,9 +3130,10 @@ get_ip() {
      print_stack_trace "$msg"
     return 1
   fi
-  local ipAddr
-  ipAddr=$(ip addr show $nic | grep inet|grep -v inet6 | awk '{print $2}'| awk '{split($0,a,"/"); print a[1]}')
-  return_function_result "$ipAddr"  "$___result___"
+  local ___ipAddr___
+  ___ipAddr___=$(ip addr show $nic | grep inet|grep -v inet6 | awk '{print $2}'| awk '{split($0,a,"/"); print a[1]}')
+
+  return_function_result "$___ipAddr___"  "$___result___"
 }
 
 # Returns the ip of the default gateway in the the gatewayIp out variable.
