@@ -4045,7 +4045,7 @@ EOF
 
   cat <<-EOF > $vmwareAutoStartService
 [Unit]
-Description=Automatically Start VMWare Virtual Machine
+Description=Automatically Start VMWare Virtual Machines
 After=network.target vmware.service
 Requires=network.target vmware.service
 Conflicts=shutdown.target
