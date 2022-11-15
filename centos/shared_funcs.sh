@@ -2724,7 +2724,7 @@ dns=none" > $network_dns_override_conf
   fi
   # We need to wait for NetworkManager to be enabled and restarted
   # otherwise is_active_nic mat fail
-  exec_command_and_show_spinner echo "waiting for NetworkManager ..." && sleep 3
+  exec_command_and_show_spinner echo "waiting for NetworkManager ..." && sleep 10
   if is_active_nic "${nic}"; then
     nmcli con mod "${connectionName}" ipv4.addresses "${nic_ip}"/24
     nmcli con mod "${connectionName}" ipv4.gateway "${defaultGateway}"
@@ -2754,6 +2754,7 @@ dns=none" > $network_dns_override_conf
       add_empty_line
     fi
 
+    exec_command_and_show_spinner echo "waiting for NetworkManager to restart connections and devices ..." && sleep 10
     nmcli con down "${connectionName}"
     nmcli con up "${connectionName}"
   else
