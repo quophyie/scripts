@@ -583,6 +583,7 @@ print_system_setup_completion_message() {
   echo "* If you are not logged into ZSH shell, you can log into ZSH using command 'zsh' "
   if is_true "${isMainframe}"; then
     echo "* You can now install VMWare Workstation"
+    echo "* Type 'list_all_vm_commands' to list all available commands for VMWare auto start commands"
   fi
   echo "* Your system is now ready for use       "
   echo "**********************************************************************************"
@@ -1123,7 +1124,7 @@ add_or_update_env_var_in_bashrc(){
 
   # Update ~/.bashrc with SHARED_SCRIPTS_DIR env var
   # Update ~/.bashrc source shared_funcs.sh
-  echo "envVarCurrentVal ===>  ${envVarCurrentVal}"
+
   if [ -z "${envVarCurrentVal}" ]; then
     # escape backslashes
     envVarRegPattern=$(echo "${envVarCurrentVal}" | sed "s|/|\/|g")
@@ -1474,7 +1475,7 @@ do_configure_user_shell(){
   else
     print_stack_trace "Cannot configure shell for Unknown OS flavour"
   fi
-  configure_shell_aliases "${__user__}"
+  # configure_shell_aliases "${__user__}"
   install_shared_funcs_lib installedSharedScriptsLibFile
   update_bashrc_with_env_vars_and_source_statements "${__user__}" "${installedSharedScriptsLibFile}"
   echo "sourcing ${profile} ..."
@@ -3964,13 +3965,17 @@ EOF'
 # creates a systemd service that is used to auto start vms
 # The function is based of this article i.e https://linuxhint.com/autostart-vmware-workstation-pro-16-linux/
 # If successful, the  env var VMWARE_AUTOSTART_CONFIG will be set with value /opt/vmware_autostart/config.json"
+# Args:
+#   $1 (user) [Default: root]: The user who is going to be used to manage virtual machines.
+#             This user must have root permissions
 create_vmware_autostart_service(){
   require_root_access
   local jqPkg=("jq")
+  local user=${1-$(whoami)}
   local autostartvmwareDir=/opt/vmware_autostart
   local vmwareAutoStartConfig=${autostartvmwareDir}/config.json
-  local vmwareAutoStartScript=${autostartvmwareDir}/vmare_autostart.sh
-  local vmwareAutoStartServiceFilename=vmare_autostart.service
+  local vmwareAutoStartScript=${autostartvmwareDir}/vmware_autostart.sh
+  local vmwareAutoStartServiceFilename=vmware_autostart.service
   local vmwareAutoStartService=${autostartvmwareDir}/${vmwareAutoStartServiceFilename}
   install_packages jqPkg
   mkdir -pv $autostartvmwareDir
@@ -4011,11 +4016,11 @@ suspend_vm() {
   /usr/bin/vmrun -T ws suspend "\$vmx_path" hard 2>/dev/null && echo "\$vm_name suspended." || echo "\$vm_name failed to suspended."
 }
 
-config_file=/opt/vmware-autostart/config.json
+config_file=/opt/vmware_autostart/config.json
 num_vms=\$(jq '.vms | length' < \$config_file)
 action="\$1"
 
-for ((counter=0; counter < \$num_vms; counter++))
+for ((counter=0; counter<\$num_vms; counter++))
 do
   vm_name=\$(jq -j ".vms[\$counter].name" < \$config_file)
   vmx_path=\$(jq -j ".vms[\$counter].vmxpath" < \$config_file)
@@ -4040,7 +4045,7 @@ EOF
 
   cat <<-EOF > $vmwareAutoStartService
 [Unit]
-Description=Automatically Start VMware Virtual Machine
+Description=Automatically Start VMWare Virtual Machine
 After=network.target vmware.service
 Requires=network.target vmware.service
 Conflicts=shutdown.target
@@ -4050,6 +4055,7 @@ Before=shutdown.target multi-user.target
 Type=oneshot
 ExecStart=$vmwareAutoStartScript start
 ExecStop=$vmwareAutoStartScript suspend
+ExecReload=$vmwareAutoStartScript suspend; $vmwareAutoStartScript start
 Restart=no
 RemainAfterExit=yes
 #User=$(whoami)
@@ -4372,6 +4378,23 @@ reboot_autostart_config_vm(){
     local errMsgSuffix="Please check and try again or use command vmrun to run VM directly"
     print_stack_trace "Could not find VM  \"${vmName}\"  in ${VMWARE_AUTOSTART_CONFIG}" "${errMsgSuffix}"
   fi
+}
+
+list_all_vm_commands() {
+  echo "******************   Autostart VM Commands ****************"
+  echo "* Please run command with 'sudo -i <COMMAND>' "
+  echo "* For example:  sudo -i list_all_vms_in_autostart_config"
+  echo ""
+  echo "create_vmware_autostart_service"
+  echo "add_vm_to_vm_autostart_config_and_start_vm"
+  echo "delete_vm_from_vm_autostart_config"
+  echo "update_vm_config_in_vm_autostart_config"
+  echo "list_all_autostarted_vms_from_autostart_config"
+  echo "list_all_vms_in_autostart_config"
+  echo "start_autostart_config_vm"
+  echo "stop_autostart_config_vm"
+  echo "reboot_autostart_config_vm"
+  echo "list_all_vm_commands"
 }
 # TODO
 # Fix Installing powerline TTY fonts for Debian / Ubuntu
