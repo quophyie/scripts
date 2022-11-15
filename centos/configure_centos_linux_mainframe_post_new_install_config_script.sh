@@ -188,8 +188,8 @@ main () {
     else
       add_empty_line
       echo "**********************************************************************************"
-      echo "* If you are using zsh please source ${USER_UNDER_CONFIG}/.zshrc"
-      echo "* else if you are using bash please source ${USER_UNDER_CONFIG}/.bash_profile"
+      echo "* If you are using zsh please source ${USER_UNDER_CONFIG_HOME}/${USER_UNDER_CONFIG}/.zshrc"
+      echo "* else if you are using bash please source ${USER_UNDER_CONFIG_HOME}/${USER_UNDER_CONFIG}/.bash_profile"
       echo "**********************************************************************************"
     fi
 

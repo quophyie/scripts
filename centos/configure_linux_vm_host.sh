@@ -179,8 +179,6 @@ main() {
 # Call main
 main
 
-# Fix NetworkManager overriding /etc/resolv.conf in clients
-
 # Unset
 #   set +e  DO NOT Exit/stop if a command exits with a non-zero status.
 set +e
