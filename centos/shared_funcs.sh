@@ -1857,7 +1857,7 @@ install_duf() {
   curl -O -L --max-redirs 5 https://github.com/muesli/duf/releases/download/"v${version}"/checksums.txt
   curl -O -L --max-redirs 5 https://github.com/muesli/duf/releases/download/"v${version}"/"${pkg}"
   local checksumRes=$(sha256sum --ignore-missing -c checksums.txt)
-  local pkgNamePattern=$(echo "${package}" |  sed 's/[.]/\./g')
+  local pkgNamePattern=$(echo "${package}" |  sed 's|[.]|\.|g')
   pkgNamePattern="${pkgNamePattern}: OK"
 
   if echo "${checksumRes}" | grep -iP "${pkgNamePattern}"; then
