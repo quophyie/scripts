@@ -453,7 +453,7 @@ is_valid_nic (){
     print_stack_trace "Network interface name (nic) is required as arg 1" "$stackSuffixMsg"
   fi
 
-  local foundDeviceName=`nmcli -f DEVICE,TYPE,STATE device | awk  -v devName="^${__nic__}$" '$1 ~ devName && NF <= 3 { print $1 }'`
+  local foundDeviceName=`nmcli -f DEVICE,TYPE,STATE device | awk  -v devName="^${__nic__}$" '$1 ~ devName && NF <= 30 { print $1 }'`
   local foundDeviceNamePattern="^${foundDeviceName}$"
 
   if echo  "${__nic__}" | grep -iP "${foundDeviceNamePattern}" ; then
@@ -481,13 +481,13 @@ is_active_nic (){
   local foundDeviceName
   # Set shell option so that script doesnt exit if there is an error from a command
   set +e
-  foundDeviceName=`nmcli -f DEVICE,TYPE,STATE device | awk  -v devName="^${__nic__}$" '$1 ~ devName && NF <= 3 { print $1 }'`
+  foundDeviceName=`nmcli -f DEVICE,TYPE,STATE device | awk  -v devName="^${__nic__}$" '$1 ~ devName && NF <= 30 { print $1 }'`
   if [ -z "${foundDeviceName}" ] && [ "${flavour}" == "debian" ]; then
-    foundDeviceName=`nmcli -f DEVICE,TYPE,STATE device | awk  -v devName="^netplan-${__nic__}$" '$1 ~ devName && NF <= 3 { print $1 }'`
+    foundDeviceName=`nmcli -f DEVICE,TYPE,STATE device | awk  -v devName="^netplan-${__nic__}$" '$1 ~ devName && NF <= 30 { print $1 }'`
   fi
   set -e
 
-  local connectedStatus=`nmcli -f DEVICE,TYPE,STATE device | awk -v connStat="^connected$" '$3 ~ connStat && NF <= 3 { print $3 }'`
+  local connectedStatus=`nmcli -f DEVICE,TYPE,STATE device | awk -v connStat="^connected$" '$3 ~ connStat && NF <= 30 { print $3 }'`
   local connectedStatusStanza="${__nic__}=connected"
   local connectedStatusTestConditionStanza="${foundDeviceName}=${connectedStatus}"
 
@@ -1755,6 +1755,14 @@ install_NetworkManager(){
   return $result
 }
 
+install_iw(){
+  local package=("iw")
+  local result=1
+  install_packages package
+  result=$?
+  return $result
+}
+
 # Install Bind9 i.e. DNS server
 # Args:
 #   $1 (dnsServerHostname): The hostname of the dns server e.g. mainframe
@@ -1777,9 +1785,6 @@ install_and_configure_dns_server(){
   local dnsReverseZoneName
 
   backup_file $namedConf
-
-    local flavour
-    get_os_flavour flavour
 
     if [ "$flavour" == "fedora" ] ; then
       install_bind9
@@ -1829,6 +1834,52 @@ install_and_configure_dns_server(){
   systemctl stop named
   systemctl start named
   echo "Finished configuring and installing DNS server ..."
+}
+
+# Installs a duf
+# Args:
+#   $1 (version) [Default: 0.8.1]
+install_duf() {
+  echo "Installing duf ..."
+  require_root_access
+  local version=${1:-"0.8.1"}
+  local pkg="duf_${version}_linux_amd64"
+  local flavour
+  get_os_flavour flavour
+
+  if [ "${flavour}" = "fedora" ]; then
+    pkg="${pkg}.rpm"
+  elif [ "${flavour}" = "debian" ]; then
+    pkg="${pkg}.deb"
+  else
+    print_stack_trace "We dont currently support duf installations on this system at the moment"
+  fi
+  curl -O -L --max-redirs 5 https://github.com/muesli/duf/releases/download/"v${version}"/checksums.txt
+  curl -O -L --max-redirs 5 https://github.com/muesli/duf/releases/download/"v${version}"/"${pkg}"
+  local checksumRes=$(sha256sum --ignore-missing -c checksums.txt)
+  local pkgNamePattern=$(echo "${package}" |  sed 's/[.]/\./g')
+  pkgNamePattern="${pkgNamePattern}: OK"
+
+  if echo "${checksumRes}" | grep -iP "${pkgNamePattern}"; then
+    if [ "${flavour}" = "fedora" ]; then
+      if ! rpm -qa | grep -iP "duf-${version}"; then
+
+        echo "duf not installed"
+        echo "proceeding to install duf ..."
+        rpm -ivh "${pkg}"
+      else
+        echo "duf already installed. skipping ..."
+      fi
+
+    elif [ "${flavour}" = "debian" ]; then
+      apt install ~/"${pkg}"
+    else
+      print_stack_trace "We dont currently support duf installations on this system at the moment"
+    fi
+  fi
+
+
+  echo "Finished installing duf ..."
 }
 
 # Configures a host Dynamic DNS client. This means that the configured host/client will send Ip and name updates to
@@ -2226,6 +2277,11 @@ configure_networking(){
 
   echo "configuring networking for NIC ${nic} on host ${hostname} ..."
 
+  add_empty_line
+
+  install_NetworkManager
+  install_iw
+
   if [ -z "${nic}" ] ; then
     print_stack_trace "The NIC (network interface card) is required for network configuration"
     return 1
@@ -2331,9 +2387,6 @@ configure_networking(){
   if is_ubuntu_18_04_or_later; then
     create_netplan_config "${nic}" --renderer="${renderer}" --use_dhcp="${useDhcp}" --nic_ip="${nic_ip}" --ssid"=${ssid}" --wifi_password="${wifiPassword}"
   fi
-
-  add_empty_line
-  install_NetworkManager
 
   if  { is_ubuntu_18_04_or_later && is_true "${useDhcp}" && [ "${renderer}" == "NetworkManager" ]; }; then
     add_empty_line
@@ -2655,10 +2708,12 @@ configure_NIC_for_NetworkManager(){
   local dns_none_config_stanza="dns=none"
   local network_dns_override_conf=/etc/NetworkManager/conf.d/no-dns-override.conf
   local network_manager_conf=/etc/NetworkManager/NetworkManager.conf
+  local globallyManagedDevsNetworkManagerConf="/usr/lib/NetworkManager/conf.d/10-globally-managed-devices.conf"
+  local globallyManagedDevsOverridesNetworkManagerConf="/etc/NetworkManager/conf.d/10-globally-managed-devices.conf"
   local flavour
   get_os_flavour flavour
 
-  local myvar=`nmcli -f DEVICE,TYPE,STATE device | awk  '$3 ~ /^connected/ && NF <= 3 { print $1 }'`
+  local myvar=`nmcli -f DEVICE,TYPE,STATE device | awk  '$3 ~ /^connected/ && NF <= 30 { print $1 }'`
 
   if [ -z "$nic" ]; then
      print_stack_trace "The name of the network interface card  (e.g. wlan0) is required. Please supply the nic as arg 1"
@@ -2691,7 +2746,11 @@ configure_NIC_for_NetworkManager(){
     connectionName="${nic}"
   fi
 
-
+  # We need make NetworkManager manage all our devices on Ubuntu
+  # See https://askubuntu.com/questions/71159/network-manager-says-device-not-managed
+  if is_ubuntu_18_04_or_later && [ -f "${globallyManagedDevsNetworkManagerConf}" ] && [ ! -f "${globallyManagedDevsOverridesNetworkManagerConf}" ] ; then
+    touch "${globallyManagedDevsOverridesNetworkManagerConf}"
+  fi
   if  ! grep -q $dns_none_config_stanza $network_manager_conf  ; then
     echo "dns=none not found in $network_manager_conf"
 #    backup_file $network_manager_conf
@@ -2710,12 +2769,12 @@ dns=none" > $network_dns_override_conf
 
   local nmConnectionFile="/etc/NetworkManager/system-connections/$connectionName.nmconnection"
 
-  if [ -f "/etc/NetworkManager/system-connections/$connectionName.nmconnection" ]; then
+   if is_ubuntu_18_04_or_later && [ -f "/run/NetworkManager/system-connections/netplan-$connectionName.nmconnection"  ]; then
+      nmConnectionFile="/run/NetworkManager/system-connections/netplan-$connectionName.nmconnection"
+  elif [ -f "/etc/NetworkManager/system-connections/$connectionName.nmconnection" ]; then
     nmConnectionFile="/etc/NetworkManager/system-connections/$connectionName.nmconnection"
   elif [ -f "/run/NetworkManager/system-connections/$connectionName.nmconnection"  ]; then
     nmConnectionFile="/run/NetworkManager/system-connections/$connectionName.nmconnection"
-  elif [ -f "/run/NetworkManager/system-connections/netplan-$connectionName.nmconnection"  ]; then
-    nmConnectionFile="/run/NetworkManager/system-connections/netplan-$connectionName.nmconnection"
   fi
 
   backup_file "${nmConnectionFile}"
@@ -4380,8 +4439,8 @@ reboot_autostart_config_vm(){
   fi
 }
 
-list_all_vm_commands() {
-  echo "******************   Autostart VM Commands ****************"
+list_all_custom_commands() {
+  echo "******************   Useful Custom Common Commands ****************"
   echo "* Please run command with 'sudo -i <COMMAND>' "
   echo "* For example:  sudo -i list_all_vms_in_autostart_config"
   echo ""
@@ -4394,7 +4453,223 @@ list_all_vm_commands() {
   echo "start_autostart_config_vm"
   echo "stop_autostart_config_vm"
   echo "reboot_autostart_config_vm"
-  echo "list_all_vm_commands"
+  echo "install_and_configure_docker"
+  echo "uninstall_docker"
+  echo "install_and_configure_kubernetes_k3d"
+  echo "uninstall_kubernetes_k3d"
+  echo "list_all_custom_commands"
+}
+
+# Installs docker. At moment we only support docker installations on Debian based systems such as Ubuntu
+# Requires sudo -i to be called. See example usage
+# Args:
+#   $1(userUnderConfig): the user config
+#   Example Usage: sudo -i install_and_configure_docker "dman"
+install_and_configure_docker(){
+  require_root_access
+  local userUnderConfig=${1}
+  echo "Installing Docker ..."
+  local osFlavour
+  local dockerPkgs=("docker-ce" "docker-ce-cli" "containerd.io" "docker-compose-plugin")
+  local dockerGpg="/etc/apt/keyrings/docker.gpg"
+  local utilsPkgs
+
+  get_os_flavour osFlavour
+
+#  if [ "${osFlavour}" != "debian" ]; then
+#    local errMsg="We only support docker installations on Debian flavoured systems such as Ubuntu"
+#    print_stack_trace "${errMsg}"
+#  fi
+  if [ "${osFlavour}" = "fedora" ]; then
+    utilsPkgs=("yum-utils")
+#    yum remove docker \
+#         docker-client \
+#         docker-client-latest \
+#         docker-common \
+#         docker-latest \
+#         docker-latest-logrotate \
+#         docker-logrotate \
+#         docker-engine
+
+    dnf remove docker \
+         docker-client \
+         docker-client-latest \
+         docker-common \
+         docker-latest \
+         docker-latest-logrotate \
+         docker-logrotate \
+         docker-engine
+#    install_packages utilsPkgs
+##    yum-config-manager --add-repo https://download.docker.com/linux/centos/docker-ce.repo
+#    # dnf check-update
+#    dnf config-manager --add-repo https://download.docker.com/linux/centos/docker-ce.repo
+#    # install_packages dockerPkgs
+#    dnf install -y docker-ce docker-ce-cli containerd.io #--nobest --skip-broken
+    curl -fsSL https://get.docker.com -o get-docker.sh
+    sh get-docker.sh
+    systemctl start docker
+
+  elif [ "${osFlavour}" = "debian" ]; then
+    utilsPkgs=("ca-certificates" "curl" "gnupg" "lsb-release")
+    if [ -z "${userUnderConfig}" ]; then
+
+        local errMsg="The user under config is required as arg 1. Please supply user under config as arg 1"
+        print_stack_trace "${errMsg}"
+      fi
+
+    if [ -f "${dockerGpg}" ]; then
+      rm -v "${dockerGpg}"
+    fi
+    apt-get remove docker docker-engine docker.io containerd runc
+    install_packages utilsPkgs
+    mkdir -p /etc/apt/keyrings
+    curl -fsSL https://download.docker.com/linux/ubuntu/gpg | gpg --dearmor -o "${dockerGpg}"
+    echo "deb [arch=$(dpkg --print-architecture) signed-by=${dockerGpg}] https://download.docker.com/linux/ubuntu \
+      $(lsb_release -cs) stable" | sudo tee /etc/apt/sources.list.d/docker.list > /dev/null
+
+    apt-get update
+    chmod a+r "${dockerGpg}"
+    apt-get update
+    install_packages dockerPkgs
+  else
+    print_stack_trace "We dont currently support Docker installations on this system at the moment"
+  fi
+  systemctl enable docker
+  sudo docker run hello-world
+  echo "Finished installing Docker"
+
+}
+
+# Uninstalls Docker
+#   Example Usage: sudo -i uninstall_docker
+uninstall_docker(){
+  echo "Uninstalling docker ..."
+  require_root_access
+  local osFlavour
+
+  get_os_flavour osFlavour
+
+  if [ "${osFlavour}" = "fedora" ]; then
+    dnf remove docker-ce docker-ce-cli containerd.io docker-compose-plugin
+  elif [ "${osFlavour}" = "debian" ]; then
+    sudo apt-get purge -y docker-ce docker-ce-cli containerd.io docker-compose-plugin
+  else
+    print_stack_trace "We dont currently support Docker installations on this system at the moment"
+  fi
+
+  sudo rm -rf /var/lib/docker
+  sudo rm -rf /var/lib/containerd
+
+  echo "Finished uninstalling docker ..."
+}
+# Installs the kubernetes distribution k3d
+# Args:
+#   $1(userUnderConfig): the user config
+#   $2(userUnderConfigHome): the home directory of user config
+#   $3 (kubeClusterName): the name of the kube cluster
+#   --kube-host-ip: The ip address of the kubernetes host.
+#                    You must provide at least one of --kube-host-ip or --kube-host
+#   --kube-host-port [Default: 6445]: The port the kubernetes host listens for kube server api requests.
+#                     This defauths to 6445
+#   --kube-host: the FQDN of the kube host e.g. ubuntu2204.homelan.com
+#                 You must provide at least one of --kube-host-ip or --kube-host
+#   Example Usage: sudo -i install_and_configure_kubernetes_k3d "dman" "/home/dman" "ubuntu2204-cluster" --kube-host-ip="192.168.0.5"  --kube-host="ubuntu2204.homelan.com"
+install_and_configure_kubernetes_k3d (){
+  echo "Installing Kubernetes k3d ..."
+  require_root_access
+  local userUnderConfig=${1}
+  local userUnderConfigHome=${2}
+  local kubeClusterName=${3}
+  local k3dConfigDir="${userUnderConfigHome}/k3d-config"
+  local k3dConfigFile="${k3dConfigDir}/k3d-config.yml"
+  local kubeHostIp
+  local kubeHostPort="6445"
+  local defaultKubeConfig="${userUnderConfigHome}/.kube/config"
+  local kubeHost
+
+
+  if [ -z "${userUnderConfig}" ]; then
+
+      local errMsg="The user under config is required as arg 1. Please supply user under config as arg 1"
+      print_stack_trace "${errMsg}"
+    fi
+
+  if [ -z "${userUnderConfigHome}" ]; then
+
+      local errMsg="User under config home directory is required as arg 2. Please supply user under config home directory as arg 2"
+      print_stack_trace "${errMsg}"
+  fi
+
+  if [ -z "${userUnderConfigHome}" ]; then
+
+      local errMsg="The kubernetes cluster name is required as arg 3. Please supply the Kubernetes cluster name as arg 3"
+      print_stack_trace "${errMsg}"
+  fi
+
+  shift
+  shift
+  shift
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --kube-host-ip=*)
+        local kubeHostIp="${1#*=}"
+        ;;
+      --kube-host-port=*)
+        kubeHostPort="${1#*=}"
+        ;;
+      --kube-host=*)
+        kubeHost="${1#*=}"
+        ;;
+      *)
+        local errMsg="Invalid Usage"
+        local errMsgSuffix="Example Usage: sudo -i install_and_configure_kubernetes_k3d \"dman\" \"/home/dman\" \"ubuntu2204-cluster\" [--kube-host-ip=\"192.168.0.5\"] [--kube-host-port=\"6445\"] [--kube-host=\"ubuntu2204.homelan.com\"]"
+        print_stack_trace "${errMsg}" "$errMsgSuffix"
+        exit 1
+    esac
+    shift
+  done
+
+  if [ -z "${kubeHost}" ] && [ -z "${kubeHostIp}" ]; then
+    local errMsg="You must provide at least one of kube-host or kube-host-ip. See example usage"
+    local errMsgSuffix="Example Usage: sudo -i install_and_configure_kubernetes_k3d \"dman\" \"/home/dman\" \"ubuntu2204-cluster\" [--kube-host-ip=\"192.168.0.5\"] [--kube-host-port=\"6445\"] [--kube-host=\"ubuntu2204.homelan.com\"]"
+    print_stack_trace "${errMsg}" "$errMsgSuffix"
+  fi
+
+  curl -s https://raw.githubusercontent.com/k3d-io/k3d/main/install.sh | bash
+
+  if [ ! -d "${k3dConfigDir}" ]; then
+    mkdir -p "${k3dConfigDir}"
+  fi
+
+  cat <<-EOF > "${k3dConfigFile}"
+apiVersion: k3d.io/v1alpha4
+kind: Simple
+metadata:
+  name: ${kubeClusterName} # name that you want to give to your cluster (will still be prefixed with `k3d-`)
+kubeAPI: # same as '--api-port myhost.my.domain:6445' (where the name would resolve to 127.0.0.1)
+  #host: "${kubeHost}" # e.g.ubuntu2204.homelan.com important for the 'server' setting in the kubeconfig
+  hostIP: "${kubeHostIp}" # where the Kubernetes API will be listening on
+  hostPort: "${kubeHostPort}"
+
+EOF
+
+  k3d cluster delete "${kubeClusterName}"
+  k3d cluster create --kubeconfig-update-default --kubeconfig-switch-context --config "${k3dConfigFile}"
+  k3d kubeconfig write "${kubeClusterName}"
+  backup_file "${defaultKubeConfig}"
+  sudo cp -v /root/.k3d/kubeconfig-"${kubeClusterName}".yaml "${defaultKubeConfig}"
+  chown "${userUnderConfig}" "${defaultKubeConfig}"
+  echo "Finished installing Kubernetes k3d ..."
+}
+
+# uninstalls kubernetes k3d
+#   Example Usage: sudo -i uninstall_kubernetes_k3d
+uninstall_kubernetes_k3d() {
+  echo "Uninstalling Kubernetes k3d ..."
+  require_root_access
+  k3d cluster delete -a
+  rm $(which k3d)
+  echo "Finised uninstalling Kubernetes k3d"
 }
 # TODO
 # Fix Installing powerline TTY fonts for Debian / Ubuntu
