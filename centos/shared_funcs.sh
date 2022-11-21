@@ -1840,7 +1840,7 @@ install_and_configure_dns_server(){
 # Args:
 #   $1 (version) [Default: 0.8.1]
 install_duf() {
-  echo "Installing duf ..."
+  echo "Installing duf ${version} ..."
   require_root_access
   local version=${1:-"0.8.1"}
   local pkg="duf_${version}_linux_amd64"
@@ -1864,11 +1864,11 @@ install_duf() {
     if [ "${flavour}" = "fedora" ]; then
       if ! rpm -qa | grep -iP "duf-${version}"; then
 
-        echo "duf not installed"
-        echo "proceeding to install duf ..."
+        echo "duf ${version} not installed"
+        echo "proceeding to install duf ${version} ..."
         rpm -ivh "${pkg}"
       else
-        echo "duf already installed. skipping ..."
+        echo "duf ${version} already installed. skipping ..."
       fi
 
     elif [ "${flavour}" = "debian" ]; then
@@ -1879,7 +1879,7 @@ install_duf() {
   fi
 
 
-  echo "Finished installing duf ..."
+  echo "Finished installing duf ${version} ..."
 }
 
 # Configures a host Dynamic DNS client. This means that the configured host/client will send Ip and name updates to
