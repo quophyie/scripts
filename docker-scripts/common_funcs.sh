@@ -165,13 +165,13 @@ build_start_microservice_containers (){
 #
 build_nodejs_docker_image() {
   dockerHubUsername=${1:-${DOCKERHUB_USERNAME}}
-  imageName=$(cat "project.json" | jq '.name')
-
+  imageName=$(cat "./package.json" | jq '.name' | sed  's/"//g')
+  echo "PackageName -> ${imageName}"
   if [ -z "${dockerHubUsername}" ]; then
     echo "Error: The dockerhub username is required"
   fi
 
-  docker build . -t "${dockerHubUsername}"/"${imageName}"
+  docker build . -t "${dockerHubUsername}/${imageName}"
 }
 
 
@@ -185,7 +185,7 @@ push_nodejs_docker_image_to_dockerhub() {
   dockerHubUsername=${1:-${DOCKERHUB_USERNAME}}
   dockerHubPassword=${2:-${DOCKERHUB_PASSWORD}}
   imageVersion=${3:-latest}
-  imageName=$(cat "project.json" | jq '.name')
+  imageName=$(cat "./package.json" | jq '.name' | sed  's/"//g')
 
   if [ -z "${dockerHubUsername}" ]; then
     echo "Error: The dockerhub username is required"
@@ -200,5 +200,6 @@ push_nodejs_docker_image_to_dockerhub() {
 
   # docker tag "${dockerHubUsername}"/"${imageName}" "${dockerHubUsername}"/"${imageName}:$imageVersion"
 
+  echo "docker pushing "${dockerHubUsername}"/"${imageName}:$imageVersion""
   docker push "${dockerHubUsername}"/"${imageName}:$imageVersion"
 }
