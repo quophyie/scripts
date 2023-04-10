@@ -158,3 +158,47 @@ build_start_microservice_containers (){
         start_service_container ${MS_VARIABLES_FILE} ${MS_SERVICE_TYPE} true
     fi
 }
+
+# builds a nodejs docker image
+# Args:
+#   dockerHubUsername ($1) - The dockerhub username
+#
+build_nodejs_docker_image() {
+  dockerHubUsername=${1:-${DOCKERHUB_USERNAME}}
+  imageName=$(cat "project.json" | jq '.name')
+
+  if [ -z "${dockerHubUsername}" ]; then
+    echo "Error: The dockerhub username is required"
+  fi
+
+  docker build . -t "${dockerHubUsername}"/"${imageName}"
+}
+
+
+# Pushes a nodejs docker image to docker hub
+# Args:
+#   dockerHubUsername ($1) - The dockerhub username
+#   dockerHubPassword ($2) - The dockerhub password
+#   imageVersion: ($3) - image version to be used a tag. If not supplied, will be set to "latest"
+#
+push_nodejs_docker_image_to_dockerhub() {
+  dockerHubUsername=${1:-${DOCKERHUB_USERNAME}}
+  dockerHubPassword=${2:-${DOCKERHUB_PASSWORD}}
+  imageVersion=${3:-latest}
+  imageName=$(cat "project.json" | jq '.name')
+
+  if [ -z "${dockerHubUsername}" ]; then
+    echo "Error: The dockerhub username is required"
+  fi
+
+  if [ -z "${dockerHubPassword}" ]; then
+      echo "Error: The dockerhub password is required"
+  fi
+
+
+  docker login --username "${dockerHubUsername}" --password "${dockerHubPassword}"
+
+  # docker tag "${dockerHubUsername}"/"${imageName}" "${dockerHubUsername}"/"${imageName}:$imageVersion"
+
+  docker push "${dockerHubUsername}"/"${imageName}:$imageVersion"
+}
