@@ -154,6 +154,10 @@ main() {
   print_os_flavour
   configure_user_provided_input_and_initialise_vars
   add_empty_line
+  install_epel
+  add_empty_line
+  install_rhel_devtools
+  add_empty_line
   install_git
   add_empty_line
   install_zsh_and_oh_my_zsh "$USER_UNDER_CONFIG" "$USER_UNDER_CONFIG_HOME" "$VCONSOLE_CONF"

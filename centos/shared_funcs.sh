@@ -1602,6 +1602,38 @@ install_powerline_fonts () {
     echo "Finished installing Powerline Fonts"
 }
 
+install_ntfs_3g_and_fuse() {
+ echo "Installing ntfs-3g and fuse ..."
+ local package=("ntfs-3g" "fuse")
+ install_packages package
+ echo "Finished installing ntfs-3g and fuse ..."
+}
+
+
+install_rhel_devtools() {
+  # The code below should be used for when the centos Stream 9 EPEL is available
+#  sudo dnf install epel-release
+#  dnf repolist
+
+  echo "Installing RHEL Development Tools ..."
+  local result=1
+  local flavour
+  get_os_flavour flavour
+  if [ "$flavour" == "fedora" ] ; then
+
+    sudo dnf groupinstall "Development Tools" -y
+    result=0
+    echo "Finished installing RHEL Development Tools ..."
+ elif [ "$flavour" == "debian" ]; then
+    echo "RHEL Development Tools cannot be installed on Debian flavoured systems. Skipping ..."
+
+ else
+    echo "RHEL Development Tools cannot be installed on an unknown flavour. Skipping ..."
+ fi
+
+  return $result
+}
+
 install_epel() {
   # The code below should be used for when the centos Stream 9 EPEL is available
 #  sudo dnf install epel-release
@@ -1612,15 +1644,18 @@ install_epel() {
   local flavour
   get_os_flavour flavour
   if [ "$flavour" == "fedora" ] ; then
-    echo " **************************************
-Note: At the time of writing this, the Centos 9 Stream EPEL repos doesnt seem to be available,
-so we have to use the centos 8 Stream EPEL repos for now.
-Before applying this fix, check and make sure that the Centos 9 Stream EPEL repos are available
-before going ahead replying yes
-**************************************"
-    sudo dnf install https://dl.fedoraproject.org/pub/epel/epel-release-latest-8.noarch.rpm -y
+#    echo " **************************************
+#Note: At the time of writing this, the Centos 9 Stream EPEL repos doesnt seem to be available,
+#so we have to use the centos 8 Stream EPEL repos for now.
+#Before applying this fix, check and make sure that the Centos 9 Stream EPEL repos are available
+#before going ahead replying yes
+#**************************************"
+#    sudo dnf install https://dl.fedoraproject.org/pub/epel/epel-release-latest-8.noarch.rpm -y
+#
+#    sed -i 's/$releasever/8/g' /etc/yum.repos.d/epel*.repo
 
-    sed -i 's/$releasever/8/g' /etc/yum.repos.d/epel*.repo
+    sudo dnf install epel-release -y
+    sudo dnf repolist
     result=0
     echo "Finished installing EPEL ..."
  elif [ "$flavour" == "debian" ]; then

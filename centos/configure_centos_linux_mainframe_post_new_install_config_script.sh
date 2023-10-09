@@ -147,6 +147,12 @@ main () {
   add_empty_line
   install_google_chrome
   add_empty_line
+  install_epel
+  add_empty_line
+  install_rhel_devtools
+  add_empty_line
+  install_ntfs_3g_and_fuse
+  add_empty_line
   # configure_hostname "$HOSTNAME"
   # add_empty_line
   add_empty_line
