@@ -1786,6 +1786,9 @@ install_and_configure_dns_server(){
 
   backup_file $namedConf
 
+    local flavour
+    get_os_flavour flavour
+
     if [ "$flavour" == "fedora" ] ; then
       install_bind9
       #   $1 (dnsForwardZone): The forward zone (domain) on the dns server
