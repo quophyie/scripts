@@ -1864,6 +1864,13 @@ install_and_configure_dns_server(){
 
       fi
 
+    # Add firewall rules
+    add_empty_line
+    echo "adding firewall rules ..."
+    firewall-cmd --add-service=dns
+    # make firewall rules permanent
+    firewall-cmd --runtime-to-permanent
+    echo "finished adding firewall rules ..."
     elif [ "$flavour" == "debian" ]; then
       install_bind9
     fi
@@ -3372,6 +3379,7 @@ Description=A Systemd service that publishes the  hostname and Ip address (i.e D
 [Service]
 Type=simple
 ExecStart=$dns_publisher_script
+StandardOutput=journal+console
 
 [Install]
 WantedBy=multi-user.target
