@@ -3311,23 +3311,41 @@ create_and_configure_dns_updates_publisher_script() {
   local domain=$HOSTNAME.$domainName.
   local zone=$domainName.
 
-  local nicIp
-  get_ip $nic nicIp
+  #local nicIp
+  #get_ip $nic nicIp
   cat <<-STOP > $dns_publisher_script
 #!/bin/bash
-echo "Sending DNS update"
+
+nicIp=
+get_ip() {
+  local nic=\$1
+
+  if [ -z "\$nic" ]; then
+    local msg="Please provide the name of the network interface card (NIC  i.e. arg 1)"
+     msg="\$msg"\$'\n'"You can issue the command 'ip a' to inspect the  network interface cards on your host"
+     echo "\$msg"
+    return 1
+  fi
+  local ___ipAddr___
+  ___ipAddr___=\$(ip addr show \$nic | grep inet|grep -v inet6 | awk '{print \$2}'| awk '{split(\$0,a,"/"); print a[1]}')
+  nicIp=\$___ipAddr___
+}
+
+get_ip $nic nicIp
+#echo "IP Address to be used in update \$nicIp"
+echo "Sending DNS update to DNS Server ${ns} "
 nsupdate -k $ddnsUpdateKey -v <<-EOF
 server $nameserverIp
 zone $zone
 update delete $domain A
-update add $domain 30 A $nicIp
+update add $domain 30 A \$nicIp
 send
 EOF
 
 if [ "\$?" -eq 0 ]; then
-  echo "Successfully sent DNS update to DNS server ${ns}"
+  echo "Successfully sent DNS update to DNS server ${ns} with the IP of this machine (IP: \${nicIp})"
 else
-  echo "Failed to send DNS update to DNS server ${ns}"
+  echo "Failed to send DNS update to DNS server ${ns} with the IP of this machine (IP: \${nicIp})"
 fi
 STOP
 
