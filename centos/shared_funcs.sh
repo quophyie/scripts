@@ -3331,9 +3331,10 @@ get_ip() {
   nicIp=\$___ipAddr___
 }
 
-get_ip $nic nicIp
+get_ip "$nic"
 #echo "IP Address to be used in update \$nicIp"
-echo "Sending DNS update to DNS Server ${ns} "
+echo "Sending DNS update to DNS Server ${ns} with our IP address of \$nicIp"
+
 nsupdate -k $ddnsUpdateKey -v <<-EOF
 server $nameserverIp
 zone $zone
@@ -3343,9 +3344,9 @@ send
 EOF
 
 if [ "\$?" -eq 0 ]; then
-  echo "Successfully sent DNS update to DNS server ${ns} with the IP of this machine (IP: \${nicIp})"
+  echo "Successfully sent DNS update to DNS server ${ns} with the IP address of this machine (IP: \${nicIp})"
 else
-  echo "Failed to send DNS update to DNS server ${ns} with the IP of this machine (IP: \${nicIp})"
+  echo "Failed to send DNS update to DNS server ${ns} with the IP address of this machine (IP: \${nicIp})"
 fi
 STOP
 
