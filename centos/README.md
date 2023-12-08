@@ -45,7 +45,21 @@ ssh dman@192.168.0.10
 #On the remote host, execute the script
 # You may have to chmod the script to make it executable
 cd ~/Downloads/
-sudo ./configure_centos_linux_mainframe_post_new_install_config_script.sh
+sudo ./configure_centos_linux_mainframe_post_new_install_config_script.sh 
+
+# Once you have installed VMWare, run the following command to create a systemd service and also create 
+# the config file /opt/vmware_autostart/config.json that will be used to auto start
+# the VMs listed in /opt/vmware_autostart/config.json
+sudo ./shared_funcs.sh create_vmware_autostart_service root
+
+# shared_funcs.sh exposes some custom commands
+# You can issue the command below to view all exposed custom commands
+
+./shared_funcs.sh  list_exposed_commands
+
+Or 
+
+./shared_funcs.sh  list_all_custom_commands
 
 # Once the script has completed, you will need to use the static ip 
 # address that you configured with script to ssh to the remote 
@@ -83,6 +97,16 @@ ssh dman@192.168.0.12
 # You may have to chmod the script to make it executable
 cd ~/Downloads/
 sudo ./configure_linux_vm_host.sh
+
+
+# shared_funcs.sh exposes some custom commands
+# You can issue the command below to view all exposed custom commands
+
+./shared_funcs.sh  list_exposed_commands
+
+Or 
+
+./shared_funcs.sh  list_all_custom_commands
 
 # Once the script has completed, you will need to use the static ip 
 # address that you configured with script to ssh to the remote 

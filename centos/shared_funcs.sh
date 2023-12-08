@@ -262,7 +262,7 @@ is_valid_cidr() {
 #   $1 (answer) : the answer provided
 is_answer_yes() {
   local __answer__=$1
-  if [ "$__answer__" == "Yes" ] || [ "$__answer__" == "yes" ] || [ "$__answer__" == "y" ] || [ "$__answer__" == "YES" ] || [ "$__answer__" == "true" ]  || [ "$__answer__" == "TRUE" ]  || [ "$__answer__" -eq  0 ] ; then
+  if [[ "$__answer__" == "Yes" ]] || [[ "$__answer__" == "yes" ]] || [[ "$__answer__" == "y" ]] || [[ "$__answer__" == "YES" ]] || [[ "$__answer__" == "true" ]]  || [[ "$__answer__" == "TRUE" ]]  || [[ "$__answer__" -eq  0 ]] ; then
     return 0
   fi
   return 1
@@ -1191,8 +1191,9 @@ EOF')
       sed -i "s|${envVarPlaceHolder}|${envVarInsertionText}|g" "${bashrc}"
     fi
   fi
-  source "${bashrc}"
-   echo "Finished updating user ${user}  bashrc file ${bashrc} with environment variable ${envVarName}=${envVarValue}"
+
+  source "${bashrc}" ""
+   echo "Finished updating user ${user} bashrc file ${bashrc} with environment variable ${envVarName}=${envVarValue}"
 }
 
 # configures shell aliases
@@ -1391,7 +1392,7 @@ EOF')
 }
 
 # Configures the shell profiles for a given user by calling do_configure_user_shell.
-# This allows us to call do_configure_user_shell with a user other than roor even if sudo is used to call this function
+# This allows us to call do_configure_user_shell with a user other than root even if sudo is used to call this function
 # It also allows us to set certain environment variables such as
 # HOME to the correct values when this function is called with sudo and not the root values used by root
 # aliases etc
@@ -1426,7 +1427,7 @@ configure_user_shell() {
   # sharedFuncLibFileRegPattern=\$(echo \"${sharedFuncLibFile}\" | sed \"s|/|\/|g\")
   # sharedFuncLibFileRegPattern=\$(echo \"\${sharedFuncLibFileRegPattern}\" | sed \"s|[.]|\.|g\")
   # sed -i \"\|^\${sharedFuncLibFileRegPattern}$|d\" \${bashrc}
-  source ${thisFile};
+  source ${thisFile} \"\";
   profileFile=
   userHome=
   get_profile_file profileFile --shell=bash
@@ -1479,7 +1480,7 @@ do_configure_user_shell(){
   install_shared_funcs_lib installedSharedScriptsLibFile
   update_bashrc_with_env_vars_and_source_statements "${__user__}" "${installedSharedScriptsLibFile}"
   echo "sourcing ${profile} ..."
-  source "${profile}"
+  source "${profile}" ""
   echo "Finished configuring shell for user ${__user__} ..."
 }
 
@@ -4504,27 +4505,6 @@ reboot_autostart_config_vm(){
   fi
 }
 
-list_all_custom_commands() {
-  echo "******************   Useful Custom Common Commands ****************"
-  echo "* Please run command with 'sudo -i <COMMAND>' "
-  echo "* For example:  sudo -i list_all_vms_in_autostart_config"
-  echo ""
-  echo "create_vmware_autostart_service"
-  echo "add_vm_to_vm_autostart_config_and_start_vm"
-  echo "delete_vm_from_vm_autostart_config"
-  echo "update_vm_config_in_vm_autostart_config"
-  echo "list_all_autostarted_vms_from_autostart_config"
-  echo "list_all_vms_in_autostart_config"
-  echo "start_autostart_config_vm"
-  echo "stop_autostart_config_vm"
-  echo "reboot_autostart_config_vm"
-  echo "install_and_configure_docker"
-  echo "uninstall_docker"
-  echo "install_and_configure_kubernetes_k3d"
-  echo "uninstall_kubernetes_k3d"
-  echo "list_all_custom_commands"
-}
-
 # Installs docker. At moment we only support docker installations on Debian based systems such as Ubuntu
 # Requires sudo -i to be called. See example usage
 # Args:
@@ -4736,6 +4716,84 @@ uninstall_kubernetes_k3d() {
   rm $(which k3d)
   echo "Finised uninstalling Kubernetes k3d"
 }
+
+list_all_custom_commands() {
+  echo "******************  Useful Exposed Custom Common Commands ****************"
+  echo "* For any function which requires root access, you need to use the sudo login shell"
+  echo "i.e. Please run command with 'sudo -i <COMMAND>' to launch a sudo login shell"
+  echo ""
+  echo "* For example:  sudo -i list_all_vms_in_autostart_config"
+  echo ""
+  echo "With the exception of 'list_all_custom_commands' and 'list_exposed_commands' commands,"
+  echo "all the other exposed / custom commands below will require a sudo login shell"
+  echo ""
+  echo "**************** Commands ***************";
+  echo ""
+  echo "configure_user_shell"
+  echo "create_vmware_autostart_service"
+  echo "add_vm_to_vm_autostart_config_and_start_vm"
+  echo "delete_vm_from_vm_autostart_config"
+  echo "update_vm_config_in_vm_autostart_config"
+  echo "list_all_autostarted_vms_from_autostart_config"
+  echo "list_all_vms_in_autostart_config"
+  echo "start_autostart_config_vm"
+  echo "stop_autostart_config_vm"
+  echo "reboot_autostart_config_vm"
+  echo "install_and_configure_docker"
+  echo "uninstall_docker"
+  echo "install_and_configure_kubernetes_k3d"
+  echo "uninstall_kubernetes_k3d"
+  echo "list_all_custom_commands"
+  echo "list_exposed_functions"
+  echo "";
+  echo "**************************************";
+  echo "";
+  echo "To call an exposed function issue one of the following commands below:";
+  echo "";
+  echo "If you HAVE sourced '${0}', then issue command below:";
+  echo "";
+  echo "sudo -i [COMMAND_NAME] [ARGS]";
+  echo "";
+  echo "";
+  echo "For Example:";
+  echo "";
+  echo "sudo -i list_all_custom_commands";
+  echo "";
+  echo "";
+  echo "If you HAVEN'T sourced '${0}' OR you want to call an exposed function directly from '${0}',"
+  echo "then issue command below:";
+  echo "";
+  echo "sudo -i ${0} [COMMAND_NAME] [ARGS]";
+  echo "";
+  echo "";
+  echo "For Example:";
+  echo "";
+  echo "sudo -i ${0} list_all_custom_commands";
+  echo "";
+}
+
+# Define functions that can be called without sourcing
+#   Example Usage: ~/Downloads/shared_funcs.sh update_bashrc_with_env_vars_and_source_statements dman ~/Downloads/shared_funcs.sh
+case "$1" in
+    "") ;;
+    configure_user_shell) "$@"; exit;;
+    create_vmware_autostart_service) "$@"; exit;;
+    add_vm_to_vm_autostart_config_and_start_vm) "$@"; exit;;
+    delete_vm_from_vm_autostart_config) "$@"; exit;;
+    update_vm_config_in_vm_autostart_config) "$@"; exit;;
+    list_all_autostarted_vms_from_autostart_config) "$@"; exit;;
+    list_all_vms_in_autostart_config) "$@"; exit;;
+    start_autostart_config_vm) "$@"; exit;;
+    stop_autostart_config_vm) "$@"; exit;;
+    reboot_autostart_config_vm) "$@"; exit;;
+    list_all_custom_commands) "$@"; exit;;
+    install_and_configure_docker) "$@"; exit;;
+    uninstall_docker) "$@"; exit;;
+    install_and_configure_kubernetes_k3d) "$@"; exit;;
+    uninstall_kubernetes_k3d) "$@"; exit;;
+    list_exposed_commands) list_all_custom_commands; exit;;
+    *) echo "Unknown function: command / function $1() cannot be found in '${0}'"; exit 2;;
+esac
 # TODO
 # Fix Installing powerline TTY fonts for Debian / Ubuntu
 # Complete DNS Configuration for Fedora and Centos
