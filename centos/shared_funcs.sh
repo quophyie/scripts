@@ -1695,6 +1695,13 @@ install_sshpass() {
   return $?
 }
 
+# Install htop
+install_htop() {
+  local package=("htop")
+  install_packages package
+  return $?
+}
+
 # Installs a package
 # Args:
 #   $1 (packages): The list of name of the packages to be installed. THIS MUST BE AN ARRAY

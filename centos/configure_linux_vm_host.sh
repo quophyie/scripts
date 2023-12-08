@@ -175,6 +175,8 @@ main() {
   add_empty_line
   install_duf
   add_empty_line
+  install_htop
+  add_empty_line
   configure_networking "$NIC" "$HOSTNAME" --nic_ip="${NIC_IP}" --local_nameserver_ip="${NS_IP}" --local_dns_domain_name="${NS_DOMAIN_NAME}"
 
   add_empty_line

@@ -158,6 +158,8 @@ main () {
   add_empty_line
   install_duf
   add_empty_line
+  install_htop
+  add_empty_line
   # configure_wpa_supplicant "$NIC" "$NIC_IP" "$SSID" "$WIFI_PASSWORD" "$NIC_CONFIG_FILE" "$NIC_CONFIG_BASE_PATH"
   add_empty_line
   configure_raid
