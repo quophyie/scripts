@@ -132,6 +132,12 @@ ${sourceBashrcStanza}
 # A more robust solution would be to inspect /etc/os-release and get the OS flavour(i.e. ID_LIKE variable) from there
 
 isRHEL="false"
+isMacOS="false"
+
+if [ "$(uname)" = "Darwin" ]; then
+  isMacOS="true"
+fi
+
 if [ -f ~/.bash_profile ] ; then
     isRHEL="true"
 	bashProfile=~/.bash_profile
@@ -145,7 +151,9 @@ fi
 
 if [ -n "${bashProfile}" ]; then
 
-	if [ "${isRHEL}" = "true" ]; then 
+	if [ "${isMacOS}" = "true" ]; then
+                echo "sourcing ${bashProfile} for Mac OS ..."
+	elif [ "${isRHEL}" = "true" ]; then 
 		echo "sourcing ${bashProfile} for RHEL based Distro ..."
 	else
 		echo "sourcing ${bashProfile} for Debian based Distro ..."
@@ -156,7 +164,7 @@ if [ -n "${bashProfile}" ]; then
 fi
 
 # If we are in the TTY terminal console, set the font to ter-powerline-v14n
-if tty | grep -iP "^/dev/tty[1-6]{1,1}" ; then
+if [ isMacOS = "false" ] && tty | grep -iP "^/dev/tty[1-6]{1,1}" ; then
   echo "Setting font to Powerline TTY font ter-powerline-v14n"
   setfont ter-powerline-v14n
 fi
@@ -170,4 +178,3 @@ bindkey "[D" backward-word
 
 # Delete Word Backword bound to Alt+Backspace
 # bindkey "^[^?" backward-kill-word
-
