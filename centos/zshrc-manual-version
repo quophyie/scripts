@@ -171,7 +171,7 @@ if [ -n "${bashProfile}" ]; then
 fi
 
 # If we are in the TTY terminal console, set the font to ter-powerline-v14n
-if [ "${isMacOS}" = "false" ] || [ "${isFreeBSD}" = "false" ]  && tty | grep -iP "^/dev/tty[1-6]{1,1}" ; then
+if [ "${isMacOS}" = "false" ] && [ "${isFreeBSD}" = "false" ]  && tty | grep -iP "^/dev/tty[1-6]{1,1}" ; then
   echo "Setting font to Powerline TTY font ter-powerline-v14n"
   setfont ter-powerline-v14n
 fi
