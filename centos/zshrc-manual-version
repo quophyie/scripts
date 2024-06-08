@@ -133,9 +133,14 @@ ${sourceBashrcStanza}
 
 isRHEL="false"
 isMacOS="false"
+isFreeBSD="false"
 
 if [ "$(uname)" = "Darwin" ]; then
   isMacOS="true"
+fi
+
+if [ "$(uname)" = "FreeBSD" ]; then
+  isFreeBSD="true"
 fi
 
 if [ -f ~/.bash_profile ] ; then
@@ -153,6 +158,8 @@ if [ -n "${bashProfile}" ]; then
 
 	if [ "${isMacOS}" = "true" ]; then
                 echo "sourcing ${bashProfile} for Mac OS ..."
+	elif [ "${isFreeBSD}" = "true" ]; then 
+		echo "sourcing ${bashProfile} for FreeBSD Unix System ..."
 	elif [ "${isRHEL}" = "true" ]; then 
 		echo "sourcing ${bashProfile} for RHEL based Distro ..."
 	else
@@ -164,7 +171,7 @@ if [ -n "${bashProfile}" ]; then
 fi
 
 # If we are in the TTY terminal console, set the font to ter-powerline-v14n
-if [ isMacOS = "false" ] && tty | grep -iP "^/dev/tty[1-6]{1,1}" ; then
+if [ "${isMacOS}" = "false" ] || [ "${isFreeBSD}" = "false" ]  && tty | grep -iP "^/dev/tty[1-6]{1,1}" ; then
   echo "Setting font to Powerline TTY font ter-powerline-v14n"
   setfont ter-powerline-v14n
 fi
